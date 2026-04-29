@@ -464,7 +464,7 @@ def render_html():
 <html>
 <head>
 <meta charset="utf-8">
-<title>BBC Flashlight</title>
+<title>Flashlight</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
 html, body {{
@@ -1047,7 +1047,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print()
-    print("BBC Flashlight")
+    print("Flashlight")
     print("Higher-res BBC URLs: ON")
     print("Graphic rejection: ON")
     print("BBC logos: crop top")
