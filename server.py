@@ -430,30 +430,9 @@ canvas {{
   -webkit-user-select: none;
 }}
 
-#debug-url {{
-  position: fixed;
-  bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: rgba(255,255,255,0.42);
-  font: 11px monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 90vw;
-  z-index: 10;
-  pointer-events: auto;
-  user-select: text;
-  -webkit-user-select: text;
-}}
-
-#debug-url.copied {{
-  color: rgba(255,255,255,0.9);
-}}
 </style>
 </head>
 <body>
-<div id="debug-url"></div>
 <canvas id="view"></canvas>
 
 <script>
@@ -462,26 +441,6 @@ const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
 
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
-const debugUrl = document.getElementById("debug-url");
-
-debugUrl.addEventListener("pointerdown", (e) => {{
-  e.stopPropagation();
-}}, {{ passive: true }});
-
-debugUrl.addEventListener("click", async (e) => {{
-  e.stopPropagation();
-  const text = debugUrl.textContent || "";
-  if (!text) return;
-
-  try {{
-    await navigator.clipboard.writeText(text);
-    debugUrl.classList.add("copied");
-    setTimeout(() => debugUrl.classList.remove("copied"), 700);
-  }} catch (err) {{
-    window.prompt("Copy image URL:", text);
-  }}
-}});
-
 
 let currentPrepared = null;
 let currentImage = null;
@@ -521,8 +480,29 @@ function resizeCanvas() {{
   }}
 }}
 
-function fitCover(sw, sh, dw, dh) {{
-  const scale = Math.max(dw / sw, dh / sh);
+function fitImageToViewport(sw, sh, dw, dh) {{
+  const screenAspect = dw / dh;
+  const imageAspect = sw / sh;
+  const isPhonePortrait = screenAspect < 0.82;
+
+  let scale;
+
+  if (isPhonePortrait) {{
+    const containScale = Math.min(dw / sw, dh / sh);
+    const coverScale = Math.max(dw / sw, dh / sh);
+
+    if (imageAspect > screenAspect * 1.35) {{
+      // Wide BBC image on a tall phone: show more of the image with a small zoom.
+      scale = Math.min(containScale * 1.22, coverScale);
+    }} else {{
+      // Portrait-ish source image: still fill the phone screen.
+      scale = coverScale;
+    }}
+  }} else {{
+    // Desktop / horizontal phone: keep full-screen cover behavior.
+    scale = Math.max(dw / sw, dh / sh);
+  }}
+
   const w = sw * scale;
   const h = sh * scale;
   return {{
@@ -578,7 +558,7 @@ function makeImage(sourceImage) {{
   offCtx.fillStyle = "#000";
   offCtx.fillRect(0, 0, off.width, off.height);
 
-  const fit = fitCover(sourceImage.width, sourceImage.height, off.width, off.height);
+  const fit = fitImageToViewport(sourceImage.width, sourceImage.height, off.width, off.height);
 
   offCtx.drawImage(
     sourceImage,
@@ -613,19 +593,15 @@ function makeImage(sourceImage) {{
   return off;
 }}
 
-function drawFallbackMessage(text) {{
+function drawFallbackMessage() {{
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "rgba(255,255,255,0.82)";
-  ctx.font = `${{Math.round(14 * DPR)}}px Arial, Helvetica, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 }}
 
 function drawFlashlight() {{
   if (!currentPrepared) {{
-    drawFallbackMessage("loading image");
+    drawFallbackMessage();
     return;
   }}
 
@@ -697,29 +673,25 @@ function prepareAndDraw(img, src) {{
   currentPrepared = makeImage(img);
   drawFlashlight();
   preloadUpcoming();
-
-  const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
-  const el = document.getElementById("debug-url");
-  el.textContent = rawUrl;
 }}
 
 function loadRandomSlide(attempts = 0) {{
   resizeCanvas();
 
   if (!slides.length) {{
-    drawFallbackMessage("no images found");
+    drawFallbackMessage();
     return;
   }}
 
   if (attempts > 40) {{
-    drawFallbackMessage("too many rejected images - refresh");
+    drawFallbackMessage();
     return;
   }}
 
   const src = getNextRandomSrc();
 
   if (!src) {{
-    drawFallbackMessage("no image");
+    drawFallbackMessage();
     return;
   }}
 
@@ -981,4 +953,3 @@ if __name__ == "__main__":
     print()
 
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
-
