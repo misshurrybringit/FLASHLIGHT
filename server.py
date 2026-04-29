@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import re
 import socket
@@ -11,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import cv2
 import numpy as np
 
-PORT = 8000
+PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/rss.xml",
@@ -413,6 +414,11 @@ html, body {{
   overflow: hidden;
   background: #000;
   cursor: pointer;
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }}
 
 canvas {{
@@ -420,6 +426,8 @@ canvas {{
   width: 100vw;
   height: 100vh;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }}
 
 #debug-url {{
@@ -434,6 +442,13 @@ canvas {{
   text-overflow: ellipsis;
   max-width: 90vw;
   z-index: 10;
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}}
+
+#debug-url.copied {{
+  color: rgba(255,255,255,0.9);
 }}
 </style>
 </head>
@@ -447,6 +462,26 @@ const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
 
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
+const debugUrl = document.getElementById("debug-url");
+
+debugUrl.addEventListener("pointerdown", (e) => {{
+  e.stopPropagation();
+}}, {{ passive: true }});
+
+debugUrl.addEventListener("click", async (e) => {{
+  e.stopPropagation();
+  const text = debugUrl.textContent || "";
+  if (!text) return;
+
+  try {{
+    await navigator.clipboard.writeText(text);
+    debugUrl.classList.add("copied");
+    setTimeout(() => debugUrl.classList.remove("copied"), 700);
+  }} catch (err) {{
+    window.prompt("Copy image URL:", text);
+  }}
+}});
+
 
 let currentPrepared = null;
 let currentImage = null;
@@ -718,28 +753,60 @@ function moveFlashlightToClientPoint(clientX, clientY) {{
   drawFlashlight();
 }}
 
-canvas.addEventListener("mousemove", (e) => {{
+let pointerDown = false;
+let pointerMoved = false;
+let pointerStartX = 0;
+let pointerStartY = 0;
+let lastTouchTime = 0;
+
+canvas.addEventListener("pointerdown", (e) => {{
+  pointerDown = true;
+  pointerMoved = false;
+  pointerStartX = e.clientX;
+  pointerStartY = e.clientY;
+  lastTouchTime = e.pointerType === "touch" ? Date.now() : lastTouchTime;
+
+  canvas.setPointerCapture?.(e.pointerId);
   moveFlashlightToClientPoint(e.clientX, e.clientY);
-}});
-
-canvas.addEventListener("touchstart", (e) => {{
-  if (!e.touches.length) return;
   e.preventDefault();
-  moveFlashlightToClientPoint(e.touches[0].clientX, e.touches[0].clientY);
 }}, {{ passive: false }});
 
-canvas.addEventListener("touchmove", (e) => {{
-  if (!e.touches.length) return;
+canvas.addEventListener("pointermove", (e) => {{
+  if (e.pointerType === "mouse" || pointerDown) {{
+    const dx = e.clientX - pointerStartX;
+    const dy = e.clientY - pointerStartY;
+
+    if (Math.sqrt(dx * dx + dy * dy) > 6) {{
+      pointerMoved = true;
+    }}
+
+    moveFlashlightToClientPoint(e.clientX, e.clientY);
+  }}
+
   e.preventDefault();
-  moveFlashlightToClientPoint(e.touches[0].clientX, e.touches[0].clientY);
 }}, {{ passive: false }});
 
-canvas.addEventListener("touchend", (e) => {{
+canvas.addEventListener("pointerup", (e) => {{
+  canvas.releasePointerCapture?.(e.pointerId);
+  moveFlashlightToClientPoint(e.clientX, e.clientY);
+
+  // A tap changes images. A drag only moves the flashlight.
+  if (!pointerMoved) {{
+    loadRandomSlide();
+  }}
+
+  pointerDown = false;
   e.preventDefault();
-  loadRandomSlide();
 }}, {{ passive: false }});
 
-canvas.addEventListener("click", () => {{
+canvas.addEventListener("pointercancel", (e) => {{
+  pointerDown = false;
+  e.preventDefault();
+}}, {{ passive: false }});
+
+// Desktop fallback for older browsers. Ignore synthetic clicks right after touch.
+canvas.addEventListener("click", (e) => {{
+  if (Date.now() - lastTouchTime < 700) return;
   loadRandomSlide();
 }});
 
@@ -914,3 +981,4 @@ if __name__ == "__main__":
     print()
 
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+
