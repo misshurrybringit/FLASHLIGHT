@@ -480,29 +480,8 @@ function resizeCanvas() {{
   }}
 }}
 
-function fitImageToViewport(sw, sh, dw, dh) {{
-  const screenAspect = dw / dh;
-  const imageAspect = sw / sh;
-  const isPhonePortrait = screenAspect < 0.82;
-
-  let scale;
-
-  if (isPhonePortrait) {{
-    const containScale = Math.min(dw / sw, dh / sh);
-    const coverScale = Math.max(dw / sw, dh / sh);
-
-    if (imageAspect > screenAspect * 1.35) {{
-      // Wide BBC image on a tall phone: show more of the image with a small zoom.
-      scale = Math.min(containScale * 1.22, coverScale);
-    }} else {{
-      // Portrait-ish source image: still fill the phone screen.
-      scale = coverScale;
-    }}
-  }} else {{
-    // Desktop / horizontal phone: keep full-screen cover behavior.
-    scale = Math.max(dw / sw, dh / sh);
-  }}
-
+function fitCover(sw, sh, dw, dh) {{
+  const scale = Math.max(dw / sw, dh / sh);
   const w = sw * scale;
   const h = sh * scale;
   return {{
@@ -558,7 +537,7 @@ function makeImage(sourceImage) {{
   offCtx.fillStyle = "#000";
   offCtx.fillRect(0, 0, off.width, off.height);
 
-  const fit = fitImageToViewport(sourceImage.width, sourceImage.height, off.width, off.height);
+  const fit = fitCover(sourceImage.width, sourceImage.height, off.width, off.height);
 
   offCtx.drawImage(
     sourceImage,
