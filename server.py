@@ -1,5 +1,4 @@
 import json
-import os
 import random
 import re
 import socket
@@ -12,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import cv2
 import numpy as np
 
-PORT = int(os.environ.get("PORT", 8000))
+PORT = 8000
 
 RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/rss.xml",
@@ -26,23 +25,19 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
     "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/uk/rss.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/health/rss.xml",
-    "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-MAX_IMAGE_POOL = 900
-SEQUENCE_LENGTH = 700
+MAX_IMAGE_POOL = 240
+SEQUENCE_LENGTH = 200
 
 IMAGE_CACHE = {"time": 0, "images": []}
-CACHE_SECONDS = 45
+CACHE_SECONDS = 120
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 360
+PROXY_CACHE_MAX_ITEMS = 160
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -51,12 +46,6 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "p0l7jnbt",
     "p0kxxp17",
     "p0n9y769",
-    "3a08bc10",
-    "c5a74450",
-    "f53b6250",
-    "p0ngd4cc",
-    "acb55400",
-    "166137e0",
 ]
 
 
@@ -135,10 +124,10 @@ def extract_rss_item_image(item):
     return None
 
 
-def get_bbc_images(limit=MAX_IMAGE_POOL, force_refresh=False):
+def get_bbc_images(limit=MAX_IMAGE_POOL):
     now = time.time()
 
-    if (not force_refresh) and IMAGE_CACHE["images"] and now - IMAGE_CACHE["time"] < CACHE_SECONDS:
+    if IMAGE_CACHE["images"] and now - IMAGE_CACHE["time"] < CACHE_SECONDS:
         cached = IMAGE_CACHE["images"][:]
         random.shuffle(cached)
         return cached[:limit]
@@ -155,7 +144,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL, force_refresh=False):
             items = root.findall(".//item")
             random.shuffle(items)
 
-            for item in items[:800]:
+            for item in items[:200]:
                 if len(images) >= limit:
                     break
 
@@ -184,18 +173,6 @@ def get_bbc_images(limit=MAX_IMAGE_POOL, force_refresh=False):
     IMAGE_CACHE["images"] = images[:]
 
     return images[:limit]
-
-
-def build_slide_sequence(force_refresh=False):
-    images = get_bbc_images(limit=MAX_IMAGE_POOL, force_refresh=force_refresh)
-    random.shuffle(images)
-
-    sequence = []
-    for img in images:
-        proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
-        sequence.append({"src": proxied})
-
-    return sequence
 
 
 def image_is_probably_full_graphic_page(data):
@@ -332,7 +309,7 @@ def crop_top_if_needed(img):
             return img, False
 
         h, w = img.shape[:2]
-        crop_y = int(h * 0.24)
+        crop_y = int(h * 0.34)
         cropped = img[crop_y:, :]
 
         if cropped is None or cropped.size == 0:
@@ -410,84 +387,15 @@ def image_has_center_divider(data):
     strong_frac = float(np.mean(row_strength > row_baseline * 1.55))
 
     return strong_frac > 0.38
-def image_is_overcropped_subject(data):
-    """Reject isolated cutout-like subjects on plain studio/editorial backgrounds."""
-    try:
-        arr = np.frombuffer(data, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    except Exception:
-        return False
-
-    if img is None or img.size == 0:
-        return False
-
-    h, w = img.shape[:2]
-    if w < 160 or h < 120:
-        return False
-
-    if max(w, h) > 700:
-        scale = 700.0 / max(w, h)
-        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-
-    h, w = img.shape[:2]
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    blur = cv2.GaussianBlur(gray, (21, 21), 0)
-    edges = cv2.Canny(blur, 35, 115)
-    edge_density = float(np.mean(edges > 0))
-
-    center = gray[
-        int(h * 0.20):int(h * 0.80),
-        int(w * 0.20):int(w * 0.80),
-    ]
-
-    outer = gray.copy()
-    outer[
-        int(h * 0.20):int(h * 0.80),
-        int(w * 0.20):int(w * 0.80),
-    ] = 0
-
-    center_std = float(np.std(center)) if center.size else 0.0
-    outer_std = float(np.std(outer)) if outer.size else 0.0
-
-    small = cv2.resize(img, (80, 80), interpolation=cv2.INTER_AREA)
-    unique_colors = len(np.unique(small.reshape(-1, 3), axis=0))
-
-    low_sat = hsv[:, :, 1] < 45
-    bright = hsv[:, :, 2] > 135
-    very_bright = hsv[:, :, 2] > 180
-    plain_bg_frac = float(np.mean(low_sat & bright))
-    very_plain_frac = float(np.mean(low_sat & very_bright))
-
-    border = np.zeros((h, w), dtype=bool)
-    margin_y = max(8, int(h * 0.10))
-    margin_x = max(8, int(w * 0.10))
-    border[:margin_y, :] = True
-    border[-margin_y:, :] = True
-    border[:, :margin_x] = True
-    border[:, -margin_x:] = True
-    border_plain_frac = float(np.mean((low_sat & bright)[border]))
-
-    if plain_bg_frac > 0.24 and edge_density < 0.09:
-        return True
-
-    if very_plain_frac > 0.18 and border_plain_frac > 0.38 and edge_density < 0.105:
-        return True
-
-    if unique_colors < 1700 and edge_density < 0.085 and border_plain_frac > 0.30:
-        return True
-
-    # Catches subject-heavy images where the middle has all the detail,
-    # but the outer/background area is comparatively empty.
-    if center_std > outer_std * 1.9 and edge_density < 0.11:
-        return True
-
-    return False
-
-
 def render_html():
-    sequence = build_slide_sequence(force_refresh=False)
+    images = get_bbc_images(limit=MAX_IMAGE_POOL)
+    random.shuffle(images)
+
+    sequence = []
+    for img in images:
+        proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
+        sequence.append({"src": proxied})
+
     sequence_json = json.dumps(sequence)
 
     return f"""<!DOCTYPE html>
@@ -511,6 +419,7 @@ canvas {{
   display: block;
   width: 100vw;
   height: 100vh;
+  touch-action: none;
 }}
 
 #debug-url {{
@@ -518,34 +427,23 @@ canvas {{
   bottom: 8px;
   left: 50%;
   transform: translateX(-50%);
-  color: rgba(255,255,255,0.55);
-  background: rgba(0,0,0,0.28);
+  color: rgba(255,255,255,0.42);
   font: 11px monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 90vw;
   z-index: 10;
-  padding: 4px 7px;
-  border-radius: 999px;
-  user-select: none;
-  cursor: copy;
-}}
-
-#debug-url:hover {{
-  color: rgba(255,255,255,0.86);
-  background: rgba(0,0,0,0.48);
 }}
 </style>
 </head>
 <body>
-<div id="debug-url" title="Click to copy image URL"></div>
+<div id="debug-url"></div>
 <canvas id="view"></canvas>
 
 <script>
 let slides = {sequence_json};
 const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
-const IMAGE_REFRESH_MS = 60000;
 
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
@@ -553,7 +451,6 @@ const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
 let currentPrepared = null;
 let currentImage = null;
 let currentSrc = null;
-let currentRawUrl = "";
 
 let mouseX = 0;
 let mouseY = 0;
@@ -612,63 +509,6 @@ function shuffleArray(arr) {{
   return a;
 }}
 
-function normalizeSlideList(newSlides) {{
-  if (!Array.isArray(newSlides)) return [];
-
-  return newSlides
-    .filter(s => s && typeof s.src === "string" && s.src.length)
-    .map(s => ({{ src: s.src }}));
-}}
-
-function mergeFreshSlides(newSlides) {{
-  const incoming = normalizeSlideList(newSlides);
-  if (!incoming.length) return 0;
-
-  const existing = new Set(slides.map(s => s.src));
-  const added = [];
-
-  for (const slide of incoming) {{
-    if (!existing.has(slide.src)) {{
-      existing.add(slide.src);
-      added.push(slide);
-    }}
-  }}
-
-  if (!added.length) return 0;
-
-  // Put fresh images near the front of future clicks without disturbing
-  // the image currently on screen.
-  slides = shuffleArray(added).concat(slides);
-
-  // Keep the browser-side list from growing forever.
-  if (slides.length > SEQUENCE_LENGTH_JS * 2) {{
-    slides = slides.slice(0, SEQUENCE_LENGTH_JS * 2);
-  }}
-
-  const freshSrcs = shuffleArray(added.map(s => s.src));
-  shuffledPool = freshSrcs.concat(shuffledPool.filter(src => !freshSrcs.includes(src)));
-
-  preloadUpcoming();
-  return added.length;
-}}
-
-async function checkForFreshImages() {{
-  try {{
-    const response = await fetch("/images?ts=" + Date.now(), {{ cache: "no-store" }});
-
-    if (!response.ok) return;
-
-    const freshSlides = await response.json();
-    const added = mergeFreshSlides(freshSlides);
-
-    if (added > 0) {{
-      console.log(`[fresh images] added ${{added}}`);
-    }}
-  }} catch (err) {{
-    console.log("[fresh images] check failed", err);
-  }}
-}}
-
 function refillPool() {{
   let candidates = slides.map(s => s.src);
 
@@ -717,7 +557,7 @@ function makeImage(sourceImage) {{
   const imageData = offCtx.getImageData(0, 0, off.width, off.height);
   const data = imageData.data;
 
-  const levels = 22;
+  const levels = 28;
   const step = 255 / (levels - 1);
 
   for (let i = 0; i < data.length; i += 4) {{
@@ -738,19 +578,23 @@ function makeImage(sourceImage) {{
   return off;
 }}
 
-function drawFallbackMessage() {{
+function drawFallbackMessage(text) {{
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "rgba(255,255,255,0.82)";
+  ctx.font = `${{Math.round(14 * DPR)}}px Arial, Helvetica, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 }}
 
 function drawFlashlight() {{
   if (!currentPrepared) {{
-    drawFallbackMessage();
+    drawFallbackMessage("loading image");
     return;
   }}
 
-  const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * 0.085;
+  const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * 0.10;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
@@ -758,11 +602,11 @@ function drawFlashlight() {{
 
   const cutout = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius);
 
-  cutout.addColorStop(0.00, "rgba(255,244,170,1.00)");
-  cutout.addColorStop(0.20, "rgba(255,228,125,0.86)");
-  cutout.addColorStop(0.50, "rgba(255,198,70,0.50)");
-  cutout.addColorStop(0.82, "rgba(255,170,40,0.20)");
-  cutout.addColorStop(1.00, "rgba(255,150,20,0.00)");
+  cutout.addColorStop(0.00, "rgba(255,248,190,1.00)");
+  cutout.addColorStop(0.20, "rgba(255,238,150,0.84)");
+  cutout.addColorStop(0.50, "rgba(255,220,95,0.46)");
+  cutout.addColorStop(0.82, "rgba(255,200,55,0.18)");
+  cutout.addColorStop(1.00, "rgba(255,185,35,0.00)");
 
   ctx.globalCompositeOperation = "destination-out";
   ctx.fillStyle = cutout;
@@ -775,10 +619,10 @@ function drawFlashlight() {{
 
   const warm = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius * 1.12);
 
-  warm.addColorStop(0.00, "rgba(255,210,75,0.42)");
-  warm.addColorStop(0.45, "rgba(255,185,45,0.24)");
-  warm.addColorStop(0.85, "rgba(255,155,20,0.10)");
-  warm.addColorStop(1.00, "rgba(255,140,0,0.00)");
+  warm.addColorStop(0.00, "rgba(255,222,95,0.36)");
+  warm.addColorStop(0.45, "rgba(255,205,60,0.20)");
+  warm.addColorStop(0.85, "rgba(255,185,35,0.075)");
+  warm.addColorStop(1.00, "rgba(255,170,20,0.00)");
 
   ctx.fillStyle = warm;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -819,25 +663,28 @@ function prepareAndDraw(img, src) {{
   drawFlashlight();
   preloadUpcoming();
 
+  const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
+  const el = document.getElementById("debug-url");
+  el.textContent = rawUrl;
 }}
 
 function loadRandomSlide(attempts = 0) {{
   resizeCanvas();
 
   if (!slides.length) {{
-    drawFallbackMessage();
+    drawFallbackMessage("no images found");
     return;
   }}
 
   if (attempts > 40) {{
-    drawFallbackMessage();
+    drawFallbackMessage("too many rejected images - refresh");
     return;
   }}
 
   const src = getNextRandomSrc();
 
   if (!src) {{
-    drawFallbackMessage();
+    drawFallbackMessage("no image");
     return;
   }}
 
@@ -864,27 +711,33 @@ function loadRandomSlide(attempts = 0) {{
   loader.src = src;
 }}
 
-const debugUrl = document.getElementById("debug-url");
-debugUrl.addEventListener("click", async (e) => {{
-  e.stopPropagation();
-  if (!currentRawUrl) return;
-
-  try {{
-    await navigator.clipboard.writeText(currentRawUrl);
-    const old = debugUrl.textContent;
-    debugUrl.textContent = "copied";
-    setTimeout(() => {{ debugUrl.textContent = old; }}, 700);
-  }} catch (err) {{
-    window.prompt("Copy image URL:", currentRawUrl);
-  }}
-}});
+function moveFlashlightToClientPoint(clientX, clientY) {{
+  const rect = canvas.getBoundingClientRect();
+  mouseX = (clientX - rect.left) * DPR;
+  mouseY = (clientY - rect.top) * DPR;
+  drawFlashlight();
+}}
 
 canvas.addEventListener("mousemove", (e) => {{
-  const rect = canvas.getBoundingClientRect();
-  mouseX = (e.clientX - rect.left) * DPR;
-  mouseY = (e.clientY - rect.top) * DPR;
-  drawFlashlight();
+  moveFlashlightToClientPoint(e.clientX, e.clientY);
 }});
+
+canvas.addEventListener("touchstart", (e) => {{
+  if (!e.touches.length) return;
+  e.preventDefault();
+  moveFlashlightToClientPoint(e.touches[0].clientX, e.touches[0].clientY);
+}}, {{ passive: false }});
+
+canvas.addEventListener("touchmove", (e) => {{
+  if (!e.touches.length) return;
+  e.preventDefault();
+  moveFlashlightToClientPoint(e.touches[0].clientX, e.touches[0].clientY);
+}}, {{ passive: false }});
+
+canvas.addEventListener("touchend", (e) => {{
+  e.preventDefault();
+  loadRandomSlide();
+}}, {{ passive: false }});
 
 canvas.addEventListener("click", () => {{
   loadRandomSlide();
@@ -906,7 +759,6 @@ mouseX = canvas.width / 2;
 mouseY = canvas.height / 2;
 refillPool();
 loadRandomSlide();
-setInterval(checkForFreshImages, IMAGE_REFRESH_MS);
 </script>
 </body>
 </html>
@@ -948,18 +800,6 @@ class Handler(BaseHTTPRequestHandler):
             html_doc = render_html()
             data = html_doc.encode("utf-8")
             self.safe_send_bytes(200, data, "text/html; charset=utf-8")
-            return
-
-
-        if path == "/images":
-            sequence = build_slide_sequence(force_refresh=True)
-            data = json.dumps(sequence).encode("utf-8")
-            self.safe_send_bytes(
-                200,
-                data,
-                "application/json; charset=utf-8",
-                {"Cache-Control": "no-store"},
-            )
             return
 
         if path == "/proxy":
@@ -1037,12 +877,6 @@ class Handler(BaseHTTPRequestHandler):
                     self.safe_send_bytes(415, b"Rejected center divider", extra_headers={"Cache-Control": "no-store"})
                     return
 
-                if image_is_overcropped_subject(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT overcropped]", url)
-                    self.safe_send_bytes(415, b"Rejected overcropped subject", extra_headers={"Cache-Control": "no-store"})
-                    return
-
                 print("[SERVE]", url)
 
                 PROXY_CACHE[url] = {
@@ -1074,13 +908,9 @@ if __name__ == "__main__":
     print("Higher-res BBC URLs: ON")
     print("Graphic rejection: ON")
     print("BBC logos: crop top")
-    print("Posterization: slightly stronger")
-    print("Light: slightly warmer")
-    print("Larger image pool: ON")
-    print("Overcropped image rejection: ON")
-    print("Auto image refresh: every 60 seconds")
+    print("Posterization: medium")
+    print("Light: medium warm")
     print(f"Serving at http://localhost:{PORT}")
     print()
 
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
-
