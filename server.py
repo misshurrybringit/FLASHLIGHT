@@ -798,14 +798,24 @@ let pointerStartX = 0;
 let pointerStartY = 0;
 let lastTouchTime = 0;
 let lastManualImageChange = Date.now();
+let handledPointerClick = false;
 const PHONE_AUTO_ADVANCE_MS = 8000;
+
+function changeImageNow() {{
+  lastManualImageChange = Date.now();
+  loadRandomSlide();
+}}
 
 canvas.addEventListener("pointerdown", (e) => {{
   pointerDown = true;
   pointerMoved = false;
   pointerStartX = e.clientX;
   pointerStartY = e.clientY;
-  lastTouchTime = e.pointerType === "touch" ? Date.now() : lastTouchTime;
+  handledPointerClick = false;
+
+  if (e.pointerType === "touch") {{
+    lastTouchTime = Date.now();
+  }}
 
   canvas.setPointerCapture?.(e.pointerId);
   moveFlashlightToClientPoint(e.clientX, e.clientY);
@@ -813,11 +823,13 @@ canvas.addEventListener("pointerdown", (e) => {{
 }}, {{ passive: false }});
 
 canvas.addEventListener("pointermove", (e) => {{
+  // Mouse should move the flashlight just by hovering.
+  // Touch should move it only while the finger is down, then stay at the last position.
   if (e.pointerType === "mouse" || pointerDown) {{
     const dx = e.clientX - pointerStartX;
     const dy = e.clientY - pointerStartY;
 
-    if (Math.sqrt(dx * dx + dy * dy) > 6) {{
+    if (Math.sqrt(dx * dx + dy * dy) > 8) {{
       pointerMoved = true;
     }}
 
@@ -831,10 +843,11 @@ canvas.addEventListener("pointerup", (e) => {{
   canvas.releasePointerCapture?.(e.pointerId);
   moveFlashlightToClientPoint(e.clientX, e.clientY);
 
-  // A tap changes images. A drag only moves the flashlight.
-  if (!pointerMoved) {{
-    lastManualImageChange = Date.now();
-    loadRandomSlide();
+  // Desktop: any click changes image.
+  // Phone: a tap changes image, but lifting after a drag does not.
+  if (e.pointerType !== "touch" || !pointerMoved) {{
+    handledPointerClick = true;
+    changeImageNow();
   }}
 
   pointerDown = false;
@@ -846,11 +859,17 @@ canvas.addEventListener("pointercancel", (e) => {{
   e.preventDefault();
 }}, {{ passive: false }});
 
-// Desktop fallback for older browsers. Ignore synthetic clicks right after touch.
+// Fallback for browsers that still fire a normal click. Avoid double-advancing
+// immediately after pointerup or after a touch event.
 canvas.addEventListener("click", (e) => {{
+  if (handledPointerClick) {{
+    handledPointerClick = false;
+    return;
+  }}
+
   if (Date.now() - lastTouchTime < 700) return;
-  lastManualImageChange = Date.now();
-  loadRandomSlide();
+
+  changeImageNow();
 }});
 
 async function refreshImagePool() {{
@@ -1090,4 +1109,3 @@ if __name__ == "__main__":
     print()
 
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
-
