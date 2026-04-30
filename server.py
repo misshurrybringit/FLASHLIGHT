@@ -15,7 +15,7 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
-    # Most time-relevant / frequently updated BBC feeds.
+    # Core BBC news feeds — broader pool so the scene filter still has lots to choose from.
     "https://feeds.bbci.co.uk/news/rss.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
@@ -26,19 +26,30 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
     "https://feeds.bbci.co.uk/news/uk/rss.xml",
     "https://feeds.bbci.co.uk/news/business/rss.xml",
+
+    # Extra BBC feeds for more usable scene images.
+    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
+    "https://feeds.bbci.co.uk/news/technology/rss.xml",
+    "https://feeds.bbci.co.uk/news/health/rss.xml",
+    "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
+    "https://feeds.bbci.co.uk/sport/rss.xml",
+    "https://feeds.bbci.co.uk/sport/football/rss.xml",
+    "https://feeds.bbci.co.uk/sport/tennis/rss.xml",
+    "https://feeds.bbci.co.uk/sport/formula1/rss.xml",
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-MAX_IMAGE_POOL = 900
-SEQUENCE_LENGTH = 700
+MAX_IMAGE_POOL = 1200
+SEQUENCE_LENGTH = 900
 
 IMAGE_CACHE = {"time": 0, "images": []}
-CACHE_SECONDS = 45
+CACHE_SECONDS = 30
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 300
+PROXY_CACHE_MAX_ITEMS = 420
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -151,7 +162,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             items = root.findall(".//item")
             random.shuffle(items)
 
-            for item in items[:800]:
+            for item in items[:1000]:
                 if len(images) >= limit:
                     break
 
@@ -534,7 +545,7 @@ html, body {{
   height: 100%;
   overflow: hidden;
   background: #000;
-  cursor: pointer;
+  cursor: none;
   touch-action: none;
   overscroll-behavior: none;
   user-select: none;
@@ -580,11 +591,11 @@ let VIEW_H = window.innerHeight;
 
 function syncContextQuality(targetCtx) {{
   targetCtx.imageSmoothingEnabled = true;
-  targetCtx.imageSmoothingQuality = "high";
+  targetCtx.imageSmoothingQuality = "medium";
 }}
 
 function resizeCanvas() {{
-  DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+  DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 1.5));
   VIEW_W = window.innerWidth;
   VIEW_H = window.innerHeight;
 
@@ -753,7 +764,7 @@ function preloadImage(src) {{
   img.onload = () => {{
     preloadedImages.set(src, img);
 
-    if (preloadedImages.size > 8) {{
+    if (preloadedImages.size > 3) {{
       const firstKey = preloadedImages.keys().next().value;
       preloadedImages.delete(firstKey);
     }}
@@ -765,10 +776,39 @@ function preloadImage(src) {{
 function preloadUpcoming() {{
   const candidates = shuffleArray(
     slides.map(s => s.src).filter(src => src !== currentSrc)
-  ).slice(0, 4);
+  ).slice(0, 1);
 
   for (const src of candidates) {{
     preloadImage(src);
+  }}
+}}
+
+async function refreshImagePool() {{
+  try {{
+    const res = await fetch('/images.json?ts=' + Date.now(), {{ cache: 'no-store' }});
+    if (!res.ok) return;
+
+    const fresh = await res.json();
+    const existing = new Set(slides.map(s => s.src));
+    let added = 0;
+
+    for (const item of fresh) {{
+      if (item && item.src && !existing.has(item.src)) {{
+        slides.push(item);
+        existing.add(item.src);
+        added += 1;
+      }}
+    }}
+
+    if (slides.length > SEQUENCE_LENGTH_JS * 2) {{
+      slides = shuffleArray(slides).slice(0, SEQUENCE_LENGTH_JS * 2);
+    }}
+
+    if (added > 0) {{
+      refillPool();
+    }}
+  }} catch (e) {{
+    // keep current images
   }}
 }}
 
@@ -856,124 +896,50 @@ function moveFlashlightToClientPoint(clientX, clientY) {{
   drawFlashlight();
 }}
 
-let pointerDown = false;
-let pointerMoved = false;
-let pointerStartX = 0;
-let pointerStartY = 0;
-let lastTouchTime = 0;
-let lastManualImageChange = Date.now();
-let handledPointerClick = false;
-const PHONE_AUTO_ADVANCE_MS = 8000;
+const AUTO_ADVANCE_MS = 5000;
+let autoAdvanceBusy = false;
 
-function changeImageNow() {{
-  lastManualImageChange = Date.now();
+function autoAdvanceImage() {{
+  if (autoAdvanceBusy) return;
+  autoAdvanceBusy = true;
   loadRandomSlide();
+  setTimeout(() => {{
+    autoAdvanceBusy = false;
+  }}, 700);
 }}
 
-canvas.addEventListener("pointerdown", (e) => {{
-  pointerDown = true;
-  pointerMoved = false;
-  pointerStartX = e.clientX;
-  pointerStartY = e.clientY;
-  handledPointerClick = false;
-
-  if (e.pointerType === "touch") {{
-    lastTouchTime = Date.now();
+// Move the flashlight with the mouse on desktop.
+canvas.addEventListener("pointermove", (e) => {{
+  if (e.pointerType === "mouse") {{
+    moveFlashlightToClientPoint(e.clientX, e.clientY);
   }}
-
-  canvas.setPointerCapture?.(e.pointerId);
-  moveFlashlightToClientPoint(e.clientX, e.clientY);
   e.preventDefault();
 }}, {{ passive: false }});
 
-canvas.addEventListener("pointermove", (e) => {{
-  // Mouse should move the flashlight just by hovering.
-  // Touch should move it only while the finger is down, then stay at the last position.
-  if (e.pointerType === "mouse" || pointerDown) {{
-    const dx = e.clientX - pointerStartX;
-    const dy = e.clientY - pointerStartY;
-
-    if (Math.sqrt(dx * dx + dy * dy) > 8) {{
-      pointerMoved = true;
-    }}
-
-    moveFlashlightToClientPoint(e.clientX, e.clientY);
-  }}
-
+// Move the flashlight with a finger on phones, but do NOT change images on tap/click.
+canvas.addEventListener("pointerdown", (e) => {{
+  canvas.setPointerCapture?.(e.pointerId);
+  moveFlashlightToClientPoint(e.clientX, e.clientY);
   e.preventDefault();
 }}, {{ passive: false }});
 
 canvas.addEventListener("pointerup", (e) => {{
   canvas.releasePointerCapture?.(e.pointerId);
   moveFlashlightToClientPoint(e.clientX, e.clientY);
-
-  // Desktop: any click changes image.
-  // Phone: a tap changes image, but lifting after a drag does not.
-  if (e.pointerType !== "touch" || !pointerMoved) {{
-    handledPointerClick = true;
-    changeImageNow();
-  }}
-
-  pointerDown = false;
   e.preventDefault();
 }}, {{ passive: false }});
 
 canvas.addEventListener("pointercancel", (e) => {{
-  pointerDown = false;
   e.preventDefault();
 }}, {{ passive: false }});
 
-// Fallback for browsers that still fire a normal click. Avoid double-advancing
-// immediately after pointerup or after a touch event.
 canvas.addEventListener("click", (e) => {{
-  if (handledPointerClick) {{
-    handledPointerClick = false;
-    return;
-  }}
-
-  if (Date.now() - lastTouchTime < 700) return;
-
-  changeImageNow();
+  // Clicking/tapping is intentionally disabled for now.
+  e.preventDefault();
 }});
 
-async function refreshImagePool() {{
-  try {{
-    const res = await fetch("/images.json?ts=" + Date.now(), {{ cache: "no-store" }});
-    if (!res.ok) return;
-
-    const fresh = await res.json();
-    const existing = new Set(slides.map(s => s.src));
-    let added = 0;
-
-    for (const item of fresh) {{
-      if (item && item.src && !existing.has(item.src)) {{
-        slides.push(item);
-        existing.add(item.src);
-        added += 1;
-      }}
-    }}
-
-    if (added > 0) {{
-      refillPool();
-    }}
-  }} catch (e) {{
-    // quiet fail
-  }}
-}}
-
-function maybeAutoAdvancePhone() {{
-  if (!isTouchDevice()) return;
-  if (pointerDown) return;
-
-  const now = Date.now();
-  if (now - lastManualImageChange >= PHONE_AUTO_ADVANCE_MS) {{
-    lastManualImageChange = now;
-    loadRandomSlide();
-  }}
-}}
-
-setInterval(maybeAutoAdvancePhone, 1000);
-setInterval(refreshImagePool, 60000);
+setInterval(autoAdvanceImage, AUTO_ADVANCE_MS);
+setInterval(refreshImagePool, 90000);
 
 window.addEventListener("resize", () => {{
   resizeCanvas();
@@ -1173,8 +1139,8 @@ if __name__ == "__main__":
     print("Light: phone larger, desktop smaller")
     print("Mobile portrait mode: prefer vertical images, then fallback")
     print("Auto-refresh image pool: ON")
-    print("Phone auto-advance: every 8 seconds")
-    print("Feeds: time-relevant BBC only")
+    print("Auto-advance: every 5 seconds")
+    print("Feeds: expanded BBC pool")
     print("Close-subject / generic portrait rejection: ON")
     print(f"Serving at http://localhost:{PORT}")
     print()
