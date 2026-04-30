@@ -41,15 +41,15 @@ RSS_FEEDS = [
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-MAX_IMAGE_POOL = 1200
-SEQUENCE_LENGTH = 900
+MAX_IMAGE_POOL = 850
+SEQUENCE_LENGTH = 650
 
 IMAGE_CACHE = {"time": 0, "images": []}
 CACHE_SECONDS = 30
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 420
+PROXY_CACHE_MAX_ITEMS = 300
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -162,7 +162,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             items = root.findall(".//item")
             random.shuffle(items)
 
-            for item in items[:1000]:
+            for item in items[:650]:
                 if len(images) >= limit:
                     break
 
@@ -572,87 +572,90 @@ let slides = {sequence_json};
 const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
 
 const canvas = document.getElementById("view");
-const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
+const ctx = canvas.getContext("2d", {{ alpha: false }});
 
 let currentPrepared = null;
 let currentImage = null;
 let currentSrc = null;
+let nextPrepared = null;
+let nextImage = null;
+let nextSrc = null;
+let preparingNext = false;
+let changingImage = false;
 
 let mouseX = 0;
 let mouseY = 0;
-
-let preloadedImages = new Map();
 let shuffledPool = [];
 let poolIndex = 0;
-
 let DPR = 1;
 let VIEW_W = window.innerWidth;
 let VIEW_H = window.innerHeight;
+let lastCanvasW = 0;
+let lastCanvasH = 0;
+
+function isTouchDevice() {{
+  return window.matchMedia("(pointer: coarse)").matches;
+}}
 
 function syncContextQuality(targetCtx) {{
   targetCtx.imageSmoothingEnabled = true;
   targetCtx.imageSmoothingQuality = "medium";
 }}
 
-function resizeCanvas() {{
-  DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 1.5));
-  VIEW_W = window.innerWidth;
-  VIEW_H = window.innerHeight;
+function resizeCanvas(force = false) {{
+  const newDPR = isTouchDevice() ? 1 : Math.max(1, Math.min(window.devicePixelRatio || 1, 1.25));
+  const newW = window.innerWidth;
+  const newH = window.innerHeight;
+  const pixelW = Math.round(newW * newDPR);
+  const pixelH = Math.round(newH * newDPR);
 
-  canvas.width = Math.round(VIEW_W * DPR);
-  canvas.height = Math.round(VIEW_H * DPR);
+  if (!force && pixelW === lastCanvasW && pixelH === lastCanvasH) return false;
+
+  DPR = newDPR;
+  VIEW_W = newW;
+  VIEW_H = newH;
+  lastCanvasW = pixelW;
+  lastCanvasH = pixelH;
+
+  canvas.width = pixelW;
+  canvas.height = pixelH;
   canvas.style.width = VIEW_W + "px";
   canvas.style.height = VIEW_H + "px";
-
   syncContextQuality(ctx);
 
   if (!mouseX && !mouseY) {{
     mouseX = canvas.width / 2;
     mouseY = canvas.height / 2;
   }}
+  return true;
 }}
 
 function fitCover(sw, sh, dw, dh) {{
   const scale = Math.max(dw / sw, dh / sh);
   const w = sw * scale;
   const h = sh * scale;
-  return {{
-    x: (dw - w) / 2,
-    y: (dh - h) / 2,
-    w,
-    h
-  }};
+  return {{ x: (dw - w) / 2, y: (dh - h) / 2, w, h }};
 }}
 
 function shuffleArray(arr) {{
   const a = arr.slice();
-
   for (let i = a.length - 1; i > 0; i--) {{
     const j = Math.floor(Math.random() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }}
-
   return a;
 }}
 
 function refillPool() {{
   let candidates = slides.map(s => s.src);
-
-  if (currentSrc && candidates.length > 1) {{
-    candidates = candidates.filter(src => src !== currentSrc);
-  }}
-
+  if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
   shuffledPool = shuffleArray(candidates).slice(0, SEQUENCE_LENGTH_JS);
   poolIndex = 0;
 }}
 
 function getNextRandomSrc() {{
-  if (!shuffledPool.length || poolIndex >= shuffledPool.length) {{
-    refillPool();
-  }}
-
+  if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool();
   if (!shuffledPool.length) return null;
-
   const src = shuffledPool[poolIndex];
   poolIndex += 1;
   return src;
@@ -662,38 +665,23 @@ function makeImage(sourceImage) {{
   const off = document.createElement("canvas");
   off.width = canvas.width;
   off.height = canvas.height;
-
-  const offCtx = off.getContext("2d", {{ willReadFrequently: true }});
+  const offCtx = off.getContext("2d", {{ alpha: false }});
   syncContextQuality(offCtx);
 
   offCtx.fillStyle = "#000";
   offCtx.fillRect(0, 0, off.width, off.height);
 
   const fit = fitCover(sourceImage.width, sourceImage.height, off.width, off.height);
-
-  offCtx.drawImage(
-    sourceImage,
-    0, 0,
-    sourceImage.width, sourceImage.height,
-    fit.x, fit.y,
-    fit.w,
-    fit.h
-  );
+  offCtx.drawImage(sourceImage, 0, 0, sourceImage.width, sourceImage.height, fit.x, fit.y, fit.w, fit.h);
 
   const imageData = offCtx.getImageData(0, 0, off.width, off.height);
   const data = imageData.data;
-
-  const levels = 22;
+  const levels = 24;
   const step = 255 / (levels - 1);
 
   for (let i = 0; i < data.length; i += 4) {{
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-
-    let gray = 0.299 * r + 0.587 * g + 0.114 * b;
-    gray = Math.round(gray / step) * step;
-
+    const grayRaw = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    const gray = Math.round(grayRaw / step) * step;
     data[i] = gray;
     data[i + 1] = gray;
     data[i + 2] = gray;
@@ -705,13 +693,9 @@ function makeImage(sourceImage) {{
 }}
 
 function drawFallbackMessage() {{
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = "source-over";
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-}}
-
-function isTouchDevice() {{
-  return window.matchMedia("(pointer: coarse)").matches;
 }}
 
 function drawFlashlight() {{
@@ -721,14 +705,13 @@ function drawFlashlight() {{
   }}
 
   const touch = isTouchDevice();
-  const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * (touch ? 0.125 : 0.075);
+  const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * (touch ? 0.125 : 0.07);
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = "source-over";
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const cutout = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius);
-
   cutout.addColorStop(0.00, "rgba(255,244,170,1.00)");
   cutout.addColorStop(0.20, "rgba(255,228,125,0.86)");
   cutout.addColorStop(0.50, "rgba(255,198,70,0.50)");
@@ -743,55 +726,22 @@ function drawFlashlight() {{
   ctx.drawImage(currentPrepared, 0, 0, canvas.width, canvas.height);
 
   ctx.globalCompositeOperation = "source-over";
-
   const warm = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius * 1.12);
-
   warm.addColorStop(0.00, "rgba(255,210,75,0.42)");
   warm.addColorStop(0.45, "rgba(255,185,45,0.24)");
   warm.addColorStop(0.85, "rgba(255,155,20,0.10)");
   warm.addColorStop(1.00, "rgba(255,140,0,0.00)");
-
   ctx.fillStyle = warm;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-}}
-
-function preloadImage(src) {{
-  if (!src || preloadedImages.has(src)) return;
-
-  const img = new Image();
-  img.decoding = "async";
-
-  img.onload = () => {{
-    preloadedImages.set(src, img);
-
-    if (preloadedImages.size > 3) {{
-      const firstKey = preloadedImages.keys().next().value;
-      preloadedImages.delete(firstKey);
-    }}
-  }};
-
-  img.src = src;
-}}
-
-function preloadUpcoming() {{
-  const candidates = shuffleArray(
-    slides.map(s => s.src).filter(src => src !== currentSrc)
-  ).slice(0, 1);
-
-  for (const src of candidates) {{
-    preloadImage(src);
-  }}
 }}
 
 async function refreshImagePool() {{
   try {{
     const res = await fetch('/images.json?ts=' + Date.now(), {{ cache: 'no-store' }});
     if (!res.ok) return;
-
     const fresh = await res.json();
     const existing = new Set(slides.map(s => s.src));
     let added = 0;
-
     for (const item of fresh) {{
       if (item && item.src && !existing.has(item.src)) {{
         slides.push(item);
@@ -799,17 +749,9 @@ async function refreshImagePool() {{
         added += 1;
       }}
     }}
-
-    if (slides.length > SEQUENCE_LENGTH_JS * 2) {{
-      slides = shuffleArray(slides).slice(0, SEQUENCE_LENGTH_JS * 2);
-    }}
-
-    if (added > 0) {{
-      refillPool();
-    }}
-  }} catch (e) {{
-    // keep current images
-  }}
+    if (slides.length > SEQUENCE_LENGTH_JS * 2) slides = shuffleArray(slides).slice(0, SEQUENCE_LENGTH_JS * 2);
+    if (added > 0) refillPool();
+  }} catch (e) {{}}
 }}
 
 function phoneIsPortrait() {{
@@ -821,71 +763,70 @@ function imageIsPortraitish(img) {{
 }}
 
 function shouldPreferPortrait(attempts) {{
-  // On vertical phones, try several times for a vertical-ish image.
-  // After that, fall back to anything so the page never gets stuck.
-  return phoneIsPortrait() && attempts < 12;
+  return phoneIsPortrait() && attempts < 6;
 }}
 
-function prepareAndDraw(img, src) {{
-  currentImage = img;
-  currentSrc = src;
-  currentPrepared = makeImage(img);
-  drawFlashlight();
-  preloadUpcoming();
+function loadImageElement(src) {{
+  return new Promise((resolve, reject) => {{
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  }});
 }}
 
-function loadRandomSlide(attempts = 0) {{
-  resizeCanvas();
+async function prepareNextSlide(attempts = 0) {{
+  if (preparingNext || nextPrepared) return;
+  if (!slides.length || attempts > 30) return;
+  preparingNext = true;
 
-  if (!slides.length) {{
-    drawFallbackMessage();
-    return;
-  }}
-
-  if (attempts > 40) {{
-    drawFallbackMessage();
-    return;
-  }}
-
-  const src = getNextRandomSrc();
-
-  if (!src) {{
-    drawFallbackMessage();
-    return;
-  }}
-
-  if (preloadedImages.has(src)) {{
-    const img = preloadedImages.get(src);
-    preloadedImages.delete(src);
+  try {{
+    const src = getNextRandomSrc();
+    if (!src) return;
+    const img = await loadImageElement(src);
 
     if (shouldPreferPortrait(attempts) && !imageIsPortraitish(img)) {{
-      loadRandomSlide(attempts + 1);
+      preparingNext = false;
+      prepareNextSlide(attempts + 1);
       return;
     }}
 
-    prepareAndDraw(img, src);
+    await new Promise(requestAnimationFrame);
+    nextPrepared = makeImage(img);
+    nextImage = img;
+    nextSrc = src;
+  }} catch (e) {{
+    const badSrc = shuffledPool[Math.max(0, poolIndex - 1)];
+    if (badSrc) slides = slides.filter(s => s.src !== badSrc);
+    preparingNext = false;
+    prepareNextSlide(attempts + 1);
     return;
+  }} finally {{
+    preparingNext = false;
   }}
+}}
 
-  const loader = new Image();
-  loader.decoding = "async";
+async function showPreparedOrPrepareNow() {{
+  if (changingImage) return;
+  changingImage = true;
 
-  loader.onload = () => {{
-    if (shouldPreferPortrait(attempts) && !imageIsPortraitish(loader)) {{
-      loadRandomSlide(attempts + 1);
-      return;
+  try {{
+    if (!nextPrepared) await prepareNextSlide();
+
+    if (nextPrepared) {{
+      currentPrepared = nextPrepared;
+      currentImage = nextImage;
+      currentSrc = nextSrc;
+      nextPrepared = null;
+      nextImage = null;
+      nextSrc = null;
+      drawFlashlight();
+      setTimeout(() => prepareNextSlide(), 50);
     }}
-
-    prepareAndDraw(loader, src);
-  }};
-
-  loader.onerror = () => {{
-    slides = slides.filter(s => s.src !== src);
-    shuffledPool = shuffledPool.filter(s => s !== src);
-    loadRandomSlide(attempts + 1);
-  }};
-
-  loader.src = src;
+  }} finally {{
+    changingImage = false;
+  }}
 }}
 
 function moveFlashlightToClientPoint(clientX, clientY) {{
@@ -897,26 +838,12 @@ function moveFlashlightToClientPoint(clientX, clientY) {{
 }}
 
 const AUTO_ADVANCE_MS = 5000;
-let autoAdvanceBusy = false;
 
-function autoAdvanceImage() {{
-  if (autoAdvanceBusy) return;
-  autoAdvanceBusy = true;
-  loadRandomSlide();
-  setTimeout(() => {{
-    autoAdvanceBusy = false;
-  }}, 700);
-}}
-
-// Move the flashlight with the mouse on desktop.
 canvas.addEventListener("pointermove", (e) => {{
-  if (e.pointerType === "mouse") {{
-    moveFlashlightToClientPoint(e.clientX, e.clientY);
-  }}
+  if (e.pointerType === "mouse") moveFlashlightToClientPoint(e.clientX, e.clientY);
   e.preventDefault();
 }}, {{ passive: false }});
 
-// Move the flashlight with a finger on phones, but do NOT change images on tap/click.
 canvas.addEventListener("pointerdown", (e) => {{
   canvas.setPointerCapture?.(e.pointerId);
   moveFlashlightToClientPoint(e.clientX, e.clientY);
@@ -925,38 +852,32 @@ canvas.addEventListener("pointerdown", (e) => {{
 
 canvas.addEventListener("pointerup", (e) => {{
   canvas.releasePointerCapture?.(e.pointerId);
-  moveFlashlightToClientPoint(e.clientX, e.clientY);
   e.preventDefault();
 }}, {{ passive: false }});
 
-canvas.addEventListener("pointercancel", (e) => {{
-  e.preventDefault();
-}}, {{ passive: false }});
+canvas.addEventListener("pointercancel", (e) => e.preventDefault(), {{ passive: false }});
+canvas.addEventListener("click", (e) => e.preventDefault());
 
-canvas.addEventListener("click", (e) => {{
-  // Clicking/tapping is intentionally disabled for now.
-  e.preventDefault();
-}});
-
-setInterval(autoAdvanceImage, AUTO_ADVANCE_MS);
-setInterval(refreshImagePool, 90000);
+setInterval(showPreparedOrPrepareNow, AUTO_ADVANCE_MS);
+setInterval(refreshImagePool, 120000);
 
 window.addEventListener("resize", () => {{
-  resizeCanvas();
-
-  if (currentImage) {{
-    currentPrepared = makeImage(currentImage);
-    drawFlashlight();
-  }} else {{
-    loadRandomSlide();
+  if (resizeCanvas(true)) {{
+    nextPrepared = null;
+    if (currentImage) {{
+      currentPrepared = makeImage(currentImage);
+      drawFlashlight();
+      setTimeout(() => prepareNextSlide(), 50);
+    }}
   }}
 }});
 
-resizeCanvas();
+resizeCanvas(true);
 mouseX = canvas.width / 2;
 mouseY = canvas.height / 2;
 refillPool();
-loadRandomSlide();
+showPreparedOrPrepareNow();
+setTimeout(() => prepareNextSlide(), 500);
 </script>
 </body>
 </html>
