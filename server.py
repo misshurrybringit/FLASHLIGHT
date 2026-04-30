@@ -34,19 +34,16 @@ RSS_FEEDS = [
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-FACE_CASCADE = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
 
-MAX_IMAGE_POOL = 520
-SEQUENCE_LENGTH = 420
+MAX_IMAGE_POOL = 1100
+SEQUENCE_LENGTH = 900
 
 IMAGE_CACHE = {"time": 0, "images": []}
-CACHE_SECONDS = 120
+CACHE_SECONDS = 30
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 260
+PROXY_CACHE_MAX_ITEMS = 420
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -154,7 +151,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL, force_refresh=False):
             items = root.findall(".//item")
             random.shuffle(items)
 
-            for item in items[:500]:
+            for item in items[:900]:
                 if len(images) >= limit:
                     break
 
@@ -409,66 +406,6 @@ def image_has_center_divider(data):
     strong_frac = float(np.mean(row_strength > row_baseline * 1.55))
 
     return strong_frac > 0.38
-
-def image_is_closeup_portrait(data):
-    """Reject generic close-up portraits while keeping wider news/documentary scenes."""
-    try:
-        arr = np.frombuffer(data, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    except Exception:
-        return False
-
-    if img is None or img.size == 0:
-        return False
-
-    h, w = img.shape[:2]
-
-    if w < 120 or h < 120:
-        return False
-
-    # Haar detection is faster and more stable on a moderate image size.
-    if max(w, h) > 760:
-        scale = 760.0 / max(w, h)
-        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-        h, w = img.shape[:2]
-
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray = cv2.equalizeHist(gray)
-
-    faces = FACE_CASCADE.detectMultiScale(
-        gray,
-        scaleFactor=1.08,
-        minNeighbors=5,
-        minSize=(55, 55),
-    )
-
-    if faces is None or len(faces) == 0:
-        return False
-
-    image_area = float(w * h)
-
-    for (x, y, fw, fh) in faces:
-        face_area = (fw * fh) / image_area
-        face_center_x = x + fw / 2.0
-        face_center_y = y + fh / 2.0
-
-        central = (
-            w * 0.20 < face_center_x < w * 0.80
-            and h * 0.10 < face_center_y < h * 0.76
-        )
-
-        # Reject one big central head/face. This is intentionally conservative
-        # so it does not remove every image containing people.
-        if central and face_area > 0.052:
-            return True
-
-        # Also reject very large faces even if slightly off-center.
-        if face_area > 0.085:
-            return True
-
-    return False
-
-
 
 def image_is_close_subject_not_scene(data):
     """Strict-mode preference: single close subject/portrait rather than a scene."""
@@ -865,7 +802,7 @@ function loadRandomSlide(attempts = 0) {{
   if (attempts > 55) {{ attempts = 25; }}
   const src = getNextRandomSrc();
   if (!src) {{ drawFallbackMessage(); return; }}
-  const strictScene = attempts < 18;
+  const strictScene = attempts < 22;
   const loadSrc = addStrictMode(src, strictScene);
 
   const loader = new Image();
@@ -1061,11 +998,13 @@ class Handler(BaseHTTPRequestHandler):
                     self.safe_send_bytes(415, b"Rejected center divider", extra_headers={"Cache-Control": "no-store"})
                     return
 
-                if image_is_closeup_portrait(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT portrait closeup]", url)
-                    self.safe_send_bytes(415, b"Rejected portrait closeup", extra_headers={"Cache-Control": "no-store"})
+                # Scene-first mode: reject close single-subject images on early attempts,
+                # then fall back later so the slideshow still has enough images.
+                if strict_scene and image_is_close_subject_not_scene(test_data):
+                    print("[SKIP strict non-scene]", url)
+                    self.safe_send_bytes(415, b"Skipped non-scene in strict mode", extra_headers={"Cache-Control": "no-store"})
                     return
+
 
                 print("[SERVE]", url)
 
@@ -1101,7 +1040,7 @@ if __name__ == "__main__":
     print("Posterization: slightly stronger")
     print("Light: slightly warmer")
     print("Auto image refresh: every 60 seconds")
-    print("Close-up portrait rejection: ON")
+    print("Scene preference: strict first, fallback later")
     print("Bottom URL copy link: ON")
     print(f"Serving at http://localhost:{PORT}")
     print()
