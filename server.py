@@ -445,6 +445,70 @@ def image_is_overcropped_subject(data):
         return True
 
     return False
+
+def image_is_close_subject_not_scene(data):
+    """Reject images that read like a single close subject/portrait rather than a scene."""
+    try:
+        arr = np.frombuffer(data, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    except Exception:
+        return False
+
+    if img is None or img.size == 0:
+        return False
+
+    h, w = img.shape[:2]
+
+    if w < 160 or h < 120:
+        return False
+
+    if max(w, h) > 720:
+        scale = 720.0 / max(w, h)
+        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        h, w = img.shape[:2]
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    ycrcb = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
+
+    edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 45, 135)
+    edge = edges > 0
+
+    center = edge[int(h * 0.14):int(h * 0.86), int(w * 0.18):int(w * 0.82)]
+    outer = edge.copy()
+    outer[int(h * 0.14):int(h * 0.86), int(w * 0.18):int(w * 0.82)] = False
+
+    center_edge = float(np.mean(center)) if center.size else 0.0
+    outer_edge = float(np.mean(outer)) + 1e-6
+    total_edge = float(np.mean(edge))
+
+    y = ycrcb[:, :, 0]
+    cr = ycrcb[:, :, 1]
+    cb = ycrcb[:, :, 2]
+    skin = (y > 45) & (cr > 132) & (cr < 178) & (cb > 78) & (cb < 135)
+
+    upper_center_skin = skin[int(h * 0.05):int(h * 0.72), int(w * 0.22):int(w * 0.78)]
+    skin_frac_upper_center = float(np.mean(upper_center_skin)) if upper_center_skin.size else 0.0
+    skin_frac_total = float(np.mean(skin))
+
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    low_context = ((sat < 45) & (val > 105)) | (val < 38)
+    low_context_frac = float(np.mean(low_context))
+
+    if center_edge > outer_edge * 2.35 and total_edge < 0.105:
+        return True
+
+    if skin_frac_upper_center > 0.075 and center_edge > outer_edge * 1.55 and total_edge < 0.13:
+        return True
+
+    if skin_frac_total > 0.16 and outer_edge < 0.030 and total_edge < 0.12:
+        return True
+
+    if low_context_frac > 0.52 and center_edge > outer_edge * 1.75 and total_edge < 0.115:
+        return True
+
+    return False
 def render_html():
     images = get_bbc_images(limit=MAX_IMAGE_POOL)
     random.shuffle(images)
@@ -1056,6 +1120,12 @@ class Handler(BaseHTTPRequestHandler):
                     self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                     return
 
+                if image_is_close_subject_not_scene(test_data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT close subject]", url)
+                    self.safe_send_bytes(415, b"Rejected close subject", extra_headers={"Cache-Control": "no-store"})
+                    return
+
                 if image_is_overcropped_subject(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
                     print("[REJECT overcropped]", url)
@@ -1105,6 +1175,7 @@ if __name__ == "__main__":
     print("Auto-refresh image pool: ON")
     print("Phone auto-advance: every 8 seconds")
     print("Feeds: time-relevant BBC only")
+    print("Close-subject / generic portrait rejection: ON")
     print(f"Serving at http://localhost:{PORT}")
     print()
 
