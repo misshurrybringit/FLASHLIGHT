@@ -26,23 +26,19 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
     "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/uk/rss.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/health/rss.xml",
-    "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-MAX_IMAGE_POOL = 900
-SEQUENCE_LENGTH = 700
+MAX_IMAGE_POOL = 240
+SEQUENCE_LENGTH = 200
 
 IMAGE_CACHE = {"time": 0, "images": []}
-CACHE_SECONDS = 45
+CACHE_SECONDS = 120
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 300
+PROXY_CACHE_MAX_ITEMS = 160
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -51,12 +47,6 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "p0l7jnbt",
     "p0kxxp17",
     "p0n9y769",
-    "3a08bc10",
-    "c5a74450",
-    "f53b6250",
-    "p0ngd4cc",
-    "166137e0",
-    "acb55400",
 ]
 
 
@@ -155,7 +145,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             items = root.findall(".//item")
             random.shuffle(items)
 
-            for item in items[:800]:
+            for item in items[:200]:
                 if len(images) >= limit:
                     break
 
@@ -320,7 +310,7 @@ def crop_top_if_needed(img):
             return img, False
 
         h, w = img.shape[:2]
-        crop_y = int(h * 0.24)
+        crop_y = int(h * 0.34)
         cropped = img[crop_y:, :]
 
         if cropped is None or cropped.size == 0:
@@ -398,57 +388,6 @@ def image_has_center_divider(data):
     strong_frac = float(np.mean(row_strength > row_baseline * 1.55))
 
     return strong_frac > 0.38
-
-
-def image_is_overcropped_subject(data):
-    """Reject isolated, cutout-like subjects on plain or low-context backgrounds."""
-    try:
-        arr = np.frombuffer(data, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    except Exception:
-        return False
-
-    if img is None or img.size == 0:
-        return False
-
-    h, w = img.shape[:2]
-
-    if max(w, h) > 700:
-        scale = 700.0 / max(w, h)
-        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-        h, w = img.shape[:2]
-
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    blur = cv2.GaussianBlur(gray, (21, 21), 0)
-    edges = cv2.Canny(blur, 40, 120)
-    edge_density = float(np.mean(edges > 0))
-
-    center = gray[int(h * 0.2):int(h * 0.8), int(w * 0.2):int(w * 0.8)]
-    outer = gray.copy()
-    outer[int(h * 0.2):int(h * 0.8), int(w * 0.2):int(w * 0.8)] = 0
-
-    center_std = float(np.std(center)) if center.size else 0.0
-    outer_std = float(np.std(outer)) + 1e-6
-
-    small = cv2.resize(img, (80, 80), interpolation=cv2.INTER_AREA)
-    unique_colors = len(np.unique(small.reshape(-1, 3), axis=0))
-
-    low_sat = hsv[:, :, 1] < 38
-    bright = hsv[:, :, 2] > 150
-    plain_bg_frac = float(np.mean(low_sat & bright))
-
-    if plain_bg_frac > 0.24 and edge_density < 0.09:
-        return True
-
-    if unique_colors < 1700 and edge_density < 0.085:
-        return True
-
-    if center_std > outer_std * 1.9 and edge_density < 0.11:
-        return True
-
-    return False
 def render_html():
     images = get_bbc_images(limit=MAX_IMAGE_POOL)
     random.shuffle(images)
@@ -464,7 +403,7 @@ def render_html():
 <html>
 <head>
 <meta charset="utf-8">
-<title>Flashlight</title>
+<title>BBC Flashlight</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
 html, body {{
@@ -612,7 +551,7 @@ function makeImage(sourceImage) {{
   const imageData = offCtx.getImageData(0, 0, off.width, off.height);
   const data = imageData.data;
 
-  const levels = 22;
+  const levels = 28;
   const step = 255 / (levels - 1);
 
   for (let i = 0; i < data.length; i += 4) {{
@@ -645,7 +584,7 @@ function drawFlashlight() {{
     return;
   }}
 
-  const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * 0.085;
+  const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * 0.10;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
@@ -653,11 +592,11 @@ function drawFlashlight() {{
 
   const cutout = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius);
 
-  cutout.addColorStop(0.00, "rgba(255,244,170,1.00)");
-  cutout.addColorStop(0.20, "rgba(255,228,125,0.86)");
-  cutout.addColorStop(0.50, "rgba(255,198,70,0.50)");
-  cutout.addColorStop(0.82, "rgba(255,170,40,0.20)");
-  cutout.addColorStop(1.00, "rgba(255,150,20,0.00)");
+  cutout.addColorStop(0.00, "rgba(255,248,190,1.00)");
+  cutout.addColorStop(0.20, "rgba(255,238,150,0.84)");
+  cutout.addColorStop(0.50, "rgba(255,220,95,0.46)");
+  cutout.addColorStop(0.82, "rgba(255,200,55,0.18)");
+  cutout.addColorStop(1.00, "rgba(255,185,35,0.00)");
 
   ctx.globalCompositeOperation = "destination-out";
   ctx.fillStyle = cutout;
@@ -670,10 +609,10 @@ function drawFlashlight() {{
 
   const warm = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius * 1.12);
 
-  warm.addColorStop(0.00, "rgba(255,210,75,0.42)");
-  warm.addColorStop(0.45, "rgba(255,185,45,0.24)");
-  warm.addColorStop(0.85, "rgba(255,155,20,0.10)");
-  warm.addColorStop(1.00, "rgba(255,140,0,0.00)");
+  warm.addColorStop(0.00, "rgba(255,222,95,0.36)");
+  warm.addColorStop(0.45, "rgba(255,205,60,0.20)");
+  warm.addColorStop(0.85, "rgba(255,185,35,0.075)");
+  warm.addColorStop(1.00, "rgba(255,170,20,0.00)");
 
   ctx.fillStyle = warm;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -705,20 +644,6 @@ function preloadUpcoming() {{
   for (const src of candidates) {{
     preloadImage(src);
   }}
-}}
-
-function phoneIsPortrait() {{
-  return window.innerHeight > window.innerWidth && window.innerWidth < 900;
-}}
-
-function imageIsPortraitish(img) {{
-  return img.height >= img.width * 0.92;
-}}
-
-function shouldPreferPortrait(attempts) {{
-  // On vertical phones, try several times for a vertical-ish image.
-  // After that, fall back to anything so the page never gets stuck.
-  return phoneIsPortrait() && attempts < 12;
 }}
 
 function prepareAndDraw(img, src) {{
@@ -836,33 +761,6 @@ canvas.addEventListener("click", (e) => {{
   loadRandomSlide();
 }});
 
-async function refreshImagePool() {{
-  try {{
-    const res = await fetch("/images.json?ts=" + Date.now(), {{ cache: "no-store" }});
-    if (!res.ok) return;
-
-    const fresh = await res.json();
-    const existing = new Set(slides.map(s => s.src));
-    let added = 0;
-
-    for (const item of fresh) {{
-      if (item && item.src && !existing.has(item.src)) {{
-        slides.push(item);
-        existing.add(item.src);
-        added += 1;
-      }}
-    }}
-
-    if (added > 0) {{
-      refillPool();
-    }}
-  }} catch (e) {{
-    // quiet fail
-  }}
-}}
-
-setInterval(refreshImagePool, 60000);
-
 window.addEventListener("resize", () => {{
   resizeCanvas();
 
@@ -920,23 +818,6 @@ class Handler(BaseHTTPRequestHandler):
             html_doc = render_html()
             data = html_doc.encode("utf-8")
             self.safe_send_bytes(200, data, "text/html; charset=utf-8")
-            return
-
-        if path == "/images.json":
-            images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            random.shuffle(images)
-            sequence = []
-            for img in images:
-                proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
-                sequence.append({"src": proxied})
-
-            data = json.dumps(sequence).encode("utf-8")
-            self.safe_send_bytes(
-                200,
-                data,
-                "application/json",
-                {"Cache-Control": "no-store"},
-            )
             return
 
         if path == "/proxy":
@@ -1008,12 +889,6 @@ class Handler(BaseHTTPRequestHandler):
                     self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                     return
 
-                if image_is_overcropped_subject(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT overcropped]", url)
-                    self.safe_send_bytes(415, b"Rejected overcropped subject", extra_headers={"Cache-Control": "no-store"})
-                    return
-
                 if image_has_center_divider(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
                     print("[REJECT divider]", url)
@@ -1047,14 +922,12 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print()
-    print("Flashlight")
+    print("BBC Flashlight")
     print("Higher-res BBC URLs: ON")
     print("Graphic rejection: ON")
     print("BBC logos: crop top")
-    print("Posterization: slightly stronger")
-    print("Light: warmer")
-    print("Mobile portrait mode: prefer vertical images, then fallback")
-    print("Auto-refresh image pool: ON")
+    print("Posterization: medium")
+    print("Light: medium warm")
     print(f"Serving at http://localhost:{PORT}")
     print()
 
