@@ -35,8 +35,8 @@ RSS_FEEDS = [
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
-MAX_IMAGE_POOL = 1100
-SEQUENCE_LENGTH = 900
+MAX_IMAGE_POOL = 1400
+SEQUENCE_LENGTH = 1200
 
 IMAGE_CACHE = {"time": 0, "images": []}
 CACHE_SECONDS = 30
@@ -53,6 +53,10 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "p0kxxp17",
     "p0n9y769",
     "3a08bc10",
+    "c5a74450",
+    "f53b6250",
+    "p0ngd4cc",
+    "166137e0",
 ]
 
 
@@ -457,8 +461,8 @@ def render_html():
 <html>
 <head>
 <meta charset="utf-8">
-<title>BBC Flashlight</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>misshurry</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
 html, body {{
   margin: 0;
@@ -467,16 +471,15 @@ html, body {{
   height: 100%;
   overflow: hidden;
   background: #000;
-  cursor: pointer;
+  cursor: none;
+  touch-action: none;
 }}
-
 canvas {{
   display: block;
   width: 100vw;
   height: 100vh;
+  touch-action: none;
 }}
-
-
 #debug-url {{
   position: fixed;
   bottom: 8px;
@@ -485,387 +488,303 @@ canvas {{
   max-width: 92vw;
   padding: 4px 8px;
   border-radius: 999px;
-  color: rgba(255,255,255,0.55);
-  background: rgba(0,0,0,0.34);
-  font: 11px monospace;
+  color: rgba(255,255,255,0.48);
+  background: rgba(0,0,0,0.28);
+  font: 10px monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   z-index: 10;
   user-select: text;
+  cursor: copy;
 }}
-
 #debug-url:hover {{
   color: rgba(255,255,255,0.92);
   background: rgba(0,0,0,0.62);
 }}
-
 </style>
 </head>
 <body>
-<div id="debug-url" title="Click to copy image URL"></div>
 <canvas id="view"></canvas>
-
+<div id="debug-url" title="Click to copy image URL"></div>
 <script>
 let slides = {sequence_json};
 const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
 const AUTO_ADVANCE_MS = 5000;
 const IMAGE_REFRESH_MS = 60000;
+const LOAD_TIMEOUT_MS = 7000;
 
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
 const debugUrl = document.getElementById("debug-url");
 
-let currentPrepared = null;
-let currentImage = null;
-let currentSrc = null;
-
-let mouseX = 0;
-let mouseY = 0;
-
-let preloadedImages = new Map();
-let shuffledPool = [];
-let poolIndex = 0;
-
 let DPR = 1;
 let VIEW_W = window.innerWidth;
 let VIEW_H = window.innerHeight;
+let mouseX = 0;
+let mouseY = 0;
+let shuffledPool = [];
+let poolIndex = 0;
+let failedSrcs = new Set();
+let recentlyShown = [];
+let currentPrepared = null;
+let currentSrc = null;
+let nextPrepared = null;
+let preparing = false;
 
+function isTouchDevice() {{
+  return window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+}}
 function syncContextQuality(targetCtx) {{
   targetCtx.imageSmoothingEnabled = true;
   targetCtx.imageSmoothingQuality = "high";
 }}
-
 function resizeCanvas() {{
-  DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+  DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, isTouchDevice() ? 1.25 : 1.45));
   VIEW_W = window.innerWidth;
   VIEW_H = window.innerHeight;
-
   canvas.width = Math.round(VIEW_W * DPR);
   canvas.height = Math.round(VIEW_H * DPR);
   canvas.style.width = VIEW_W + "px";
   canvas.style.height = VIEW_H + "px";
-
   syncContextQuality(ctx);
-
   if (!mouseX && !mouseY) {{
     mouseX = canvas.width / 2;
     mouseY = canvas.height / 2;
   }}
 }}
-
 function fitCover(sw, sh, dw, dh) {{
   const scale = Math.max(dw / sw, dh / sh);
   const w = sw * scale;
   const h = sh * scale;
-  return {{
-    x: (dw - w) / 2,
-    y: (dh - h) / 2,
-    w,
-    h
-  }};
+  return {{ x: (dw - w) / 2, y: (dh - h) / 2, w, h }};
 }}
-
 function shuffleArray(arr) {{
   const a = arr.slice();
-
   for (let i = a.length - 1; i > 0; i--) {{
     const j = Math.floor(Math.random() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }}
-
   return a;
 }}
-
 function normalizeSlideList(newSlides) {{
   if (!Array.isArray(newSlides)) return [];
-
-  return newSlides
-    .filter(s => s && typeof s.src === "string" && s.src.length)
-    .map(s => ({{ src: s.src }}));
+  return newSlides.filter(s => s && typeof s.src === "string" && s.src.length).map(s => ({{ src: s.src }}));
 }}
-
 function mergeFreshSlides(newSlides) {{
   const incoming = normalizeSlideList(newSlides);
-  if (!incoming.length) return 0;
-
+  if (!incoming.length) return;
   const existing = new Set(slides.map(s => s.src));
   const added = [];
-
   for (const slide of incoming) {{
     if (!existing.has(slide.src)) {{
       existing.add(slide.src);
       added.push(slide);
     }}
   }}
-
-  if (!added.length) return 0;
-
-  // Put fresh images near the front of future clicks without disturbing
-  // the image currently on screen.
+  if (!added.length) return;
   slides = shuffleArray(added).concat(slides);
-
-  // Keep the browser-side list from growing forever.
-  if (slides.length > SEQUENCE_LENGTH_JS * 2) {{
-    slides = slides.slice(0, SEQUENCE_LENGTH_JS * 2);
-  }}
-
-  const freshSrcs = shuffleArray(added.map(s => s.src));
-  shuffledPool = freshSrcs.concat(shuffledPool.filter(src => !freshSrcs.includes(src)));
-
-  preloadUpcoming();
-  return added.length;
+  if (slides.length > SEQUENCE_LENGTH_JS * 2) slides = slides.slice(0, SEQUENCE_LENGTH_JS * 2);
+  const fresh = shuffleArray(added.map(s => s.src));
+  shuffledPool = fresh.concat(shuffledPool.filter(src => !fresh.includes(src)));
 }}
-
 async function checkForFreshImages() {{
   try {{
     const response = await fetch("/images?ts=" + Date.now(), {{ cache: "no-store" }});
-
     if (!response.ok) return;
-
-    const freshSlides = await response.json();
-    const added = mergeFreshSlides(freshSlides);
-
-    if (added > 0) {{
-      console.log(`[fresh images] added ${{added}}`);
-    }}
-  }} catch (err) {{
-    console.log("[fresh images] check failed", err);
-  }}
+    mergeFreshSlides(await response.json());
+    prepareNext();
+  }} catch (err) {{ console.log("fresh image check failed", err); }}
 }}
-
 function refillPool() {{
-  let candidates = slides.map(s => s.src);
-
-  if (currentSrc && candidates.length > 1) {{
-    candidates = candidates.filter(src => src !== currentSrc);
+  let candidates = slides.map(s => s.src).filter(src => !failedSrcs.has(src));
+  if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
+  if (recentlyShown.length && candidates.length > recentlyShown.length + 8) {{
+    const recent = new Set(recentlyShown);
+    candidates = candidates.filter(src => !recent.has(src));
   }}
-
   shuffledPool = shuffleArray(candidates).slice(0, SEQUENCE_LENGTH_JS);
   poolIndex = 0;
-}}
-
-function getNextRandomSrc() {{
-  if (!shuffledPool.length || poolIndex >= shuffledPool.length) {{
-    refillPool();
+  if (!shuffledPool.length && slides.length) {{
+    failedSrcs.clear();
+    recentlyShown = [];
+    shuffledPool = shuffleArray(slides.map(s => s.src)).slice(0, SEQUENCE_LENGTH_JS);
   }}
-
+}}
+function getNextRandomSrc() {{
+  if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool();
   if (!shuffledPool.length) return null;
-
   const src = shuffledPool[poolIndex];
   poolIndex += 1;
   return src;
 }}
-
+function addStrictMode(src, strictScene) {{
+  return src + (src.includes("?") ? "&" : "?") + "strict=" + (strictScene ? "1" : "0");
+}}
 function makeImage(sourceImage) {{
   const off = document.createElement("canvas");
   off.width = canvas.width;
   off.height = canvas.height;
-
   const offCtx = off.getContext("2d", {{ willReadFrequently: true }});
   syncContextQuality(offCtx);
-
   offCtx.fillStyle = "#000";
   offCtx.fillRect(0, 0, off.width, off.height);
-
   const fit = fitCover(sourceImage.width, sourceImage.height, off.width, off.height);
-
-  offCtx.drawImage(
-    sourceImage,
-    0, 0,
-    sourceImage.width, sourceImage.height,
-    fit.x, fit.y,
-    fit.w,
-    fit.h
-  );
-
+  offCtx.drawImage(sourceImage, 0, 0, sourceImage.width, sourceImage.height, fit.x, fit.y, fit.w, fit.h);
   const imageData = offCtx.getImageData(0, 0, off.width, off.height);
   const data = imageData.data;
-
   const levels = 22;
   const step = 255 / (levels - 1);
-
   for (let i = 0; i < data.length; i += 4) {{
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-
+    const r = data[i], g = data[i + 1], b = data[i + 2];
     let gray = 0.299 * r + 0.587 * g + 0.114 * b;
     gray = Math.round(gray / step) * step;
-
-    data[i] = gray;
-    data[i + 1] = gray;
-    data[i + 2] = gray;
-    data[i + 3] = 255;
+    data[i] = gray; data[i + 1] = gray; data[i + 2] = gray; data[i + 3] = 255;
   }}
-
   offCtx.putImageData(imageData, 0, 0);
   return off;
 }}
-
-function drawFallbackMessage() {{
+function loadAndPrepare(src, strictScene) {{
+  return new Promise((resolve, reject) => {{
+    const img = new Image();
+    img.decoding = "async";
+    let done = false;
+    const timeout = setTimeout(() => {{ if (!done) {{ done = true; reject(new Error("timeout")); }} }}, LOAD_TIMEOUT_MS);
+    img.onload = () => {{
+      if (done) return;
+      done = true; clearTimeout(timeout);
+      try {{ resolve({{ src, prepared: makeImage(img) }}); }} catch (err) {{ reject(err); }}
+    }};
+    img.onerror = () => {{ if (!done) {{ done = true; clearTimeout(timeout); reject(new Error("image load failed")); }} }};
+    img.src = addStrictMode(src, strictScene);
+  }});
+}}
+async function prepareNext() {{
+  if (preparing || nextPrepared) return;
+  preparing = true;
+  try {{
+    for (let attempt = 0; attempt < 28; attempt++) {{
+      const src = getNextRandomSrc();
+      if (!src) break;
+      const strictScene = attempt < 14;
+      try {{
+        nextPrepared = await loadAndPrepare(src, strictScene);
+        preparing = false;
+        return;
+      }} catch (err) {{
+        if (strictScene) {{
+          try {{
+            nextPrepared = await loadAndPrepare(src, false);
+            preparing = false;
+            return;
+          }} catch (err2) {{ failedSrcs.add(src); }}
+        }} else {{ failedSrcs.add(src); }}
+      }}
+    }}
+  }} finally {{ preparing = false; }}
+}}
+function drawBlack() {{
+  ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }}
-
 function drawFlashlight() {{
-  if (!currentPrepared) {{
-    drawFallbackMessage();
-    return;
-  }}
-
-  const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * 0.085;
-
+  if (!currentPrepared) {{ drawBlack(); return; }}
+  const radiusMultiplier = isTouchDevice() ? 0.145 : 0.070;
+  const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * radiusMultiplier;
+  ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
   const cutout = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius);
-
   cutout.addColorStop(0.00, "rgba(255,244,170,1.00)");
   cutout.addColorStop(0.20, "rgba(255,228,125,0.86)");
   cutout.addColorStop(0.50, "rgba(255,198,70,0.50)");
   cutout.addColorStop(0.82, "rgba(255,170,40,0.20)");
   cutout.addColorStop(1.00, "rgba(255,150,20,0.00)");
-
   ctx.globalCompositeOperation = "destination-out";
   ctx.fillStyle = cutout;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
   ctx.globalCompositeOperation = "destination-over";
   ctx.drawImage(currentPrepared, 0, 0, canvas.width, canvas.height);
-
   ctx.globalCompositeOperation = "source-over";
-
   const warm = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius * 1.12);
-
   warm.addColorStop(0.00, "rgba(255,210,75,0.42)");
   warm.addColorStop(0.45, "rgba(255,185,45,0.24)");
   warm.addColorStop(0.85, "rgba(255,155,20,0.10)");
   warm.addColorStop(1.00, "rgba(255,140,0,0.00)");
-
   ctx.fillStyle = warm;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }}
-
-function preloadImage(src) {{
-  if (!src || preloadedImages.has(src)) return;
-
-  const img = new Image();
-  img.decoding = "async";
-
-  img.onload = () => {{
-    preloadedImages.set(src, img);
-
-    if (preloadedImages.size > 8) {{
-      const firstKey = preloadedImages.keys().next().value;
-      preloadedImages.delete(firstKey);
-    }}
-  }};
-
-  img.src = src;
+function updateDebugUrl(src) {{
+  if (!debugUrl || !src) return;
+  const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
+  debugUrl.textContent = rawUrl;
+  debugUrl.dataset.url = rawUrl;
+  debugUrl.title = "Click to copy: " + rawUrl;
 }}
-
-function preloadUpcoming() {{
-  const candidates = shuffleArray(
-    slides.map(s => s.src).filter(src => src !== currentSrc)
-  ).slice(0, 4);
-
-  for (const src of candidates) {{
-    preloadImage(src);
-  }}
-}}
-
-function prepareAndDraw(img, src) {{
-  currentImage = img;
-  currentSrc = src;
-  currentPrepared = makeImage(img);
+function showPrepared(item) {{
+  currentPrepared = item.prepared;
+  currentSrc = item.src;
+  recentlyShown.push(item.src);
+  if (recentlyShown.length > Math.min(140, Math.floor(slides.length * 0.55))) recentlyShown.shift();
+  updateDebugUrl(item.src);
   drawFlashlight();
-  preloadUpcoming();
-
-  if (debugUrl) {{
-    const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
-    debugUrl.textContent = rawUrl;
-    debugUrl.dataset.url = rawUrl;
-    debugUrl.title = "Click to copy: " + rawUrl;
+}}
+async function advanceSlide() {{
+  if (nextPrepared) {{
+    const item = nextPrepared;
+    nextPrepared = null;
+    showPrepared(item);
+    prepareNext();
+    return;
+  }}
+  prepareNext();
+  if (!currentPrepared) {{
+    const wait = setInterval(() => {{
+      if (nextPrepared) {{ clearInterval(wait); advanceSlide(); }}
+    }}, 150);
   }}
 }}
-
-function addStrictMode(src, strictScene) {{
-  return src + (src.includes("?") ? "&" : "?") + "strict=" + (strictScene ? "1" : "0");
-}}
-
-function loadRandomSlide(attempts = 0) {{
-  resizeCanvas();
-  if (!slides.length) {{ drawFallbackMessage(); return; }}
-  if (attempts > 55) {{ attempts = 25; }}
-  const src = getNextRandomSrc();
-  if (!src) {{ drawFallbackMessage(); return; }}
-  const strictScene = attempts < 22;
-  const loadSrc = addStrictMode(src, strictScene);
-
-  const loader = new Image();
-  loader.decoding = "async";
-  loader.onload = () => {{ prepareAndDraw(loader, src); }};
-  loader.onerror = () => {{
-    if (!strictScene) {{
-      slides = slides.filter(s => s.src !== src);
-      shuffledPool = shuffledPool.filter(s => s !== src);
-    }}
-    loadRandomSlide(attempts + 1);
-  }};
-  loader.src = loadSrc;
-}}
-
-
-canvas.addEventListener("mousemove", (e) => {{
+function updatePointerFromEvent(e) {{
   const rect = canvas.getBoundingClientRect();
+  const offsetY = isTouchDevice() ? window.innerHeight * 0.12 : 0;
   mouseX = (e.clientX - rect.left) * DPR;
-  mouseY = (e.clientY - rect.top) * DPR;
+  mouseY = ((e.clientY - rect.top) - offsetY) * DPR;
   drawFlashlight();
-}});
-
+}}
+canvas.addEventListener("mousemove", (e) => {{ if (!isTouchDevice()) updatePointerFromEvent(e); }});
+canvas.addEventListener("pointerdown", (e) => {{ e.preventDefault(); updatePointerFromEvent(e); }});
+canvas.addEventListener("pointermove", (e) => {{ e.preventDefault(); updatePointerFromEvent(e); }});
+canvas.addEventListener("click", (e) => {{ e.preventDefault(); }});
 if (debugUrl) {{
   debugUrl.addEventListener("click", async (e) => {{
     e.stopPropagation();
     const url = debugUrl.dataset.url || debugUrl.textContent || "";
     if (!url) return;
-
     try {{
       await navigator.clipboard.writeText(url);
       const oldText = debugUrl.textContent;
       debugUrl.textContent = "copied: " + url;
-      setTimeout(() => {{
-        debugUrl.textContent = oldText;
-      }}, 900);
-    }} catch (err) {{
-      window.prompt("Copy this image URL:", url);
-    }}
+      setTimeout(() => {{ debugUrl.textContent = oldText; }}, 900);
+    }} catch (err) {{ window.prompt("Copy this image URL:", url); }}
   }});
 }}
-
-canvas.addEventListener("click", (e) => {{
-  e.preventDefault();
-}});
-
 window.addEventListener("resize", () => {{
   resizeCanvas();
-
-  if (currentImage) {{
-    currentPrepared = makeImage(currentImage);
-    drawFlashlight();
-  }} else {{
-    loadRandomSlide();
-  }}
+  if (currentSrc) {{
+    const oldSrc = currentSrc;
+    loadAndPrepare(oldSrc, false).then(showPrepared).catch(() => drawFlashlight());
+  }} else {{ drawFlashlight(); }}
 }});
-
 resizeCanvas();
 mouseX = canvas.width / 2;
 mouseY = canvas.height / 2;
 refillPool();
-loadRandomSlide();
-setInterval(loadRandomSlide, AUTO_ADVANCE_MS);
+prepareNext();
+advanceSlide();
+setInterval(advanceSlide, AUTO_ADVANCE_MS);
 setInterval(checkForFreshImages, IMAGE_REFRESH_MS);
 </script>
 </body>
