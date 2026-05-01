@@ -621,132 +621,226 @@ function getNextRandomSrc() {{
 function addStrictMode(src, strictScene) {{
   return src + (src.includes("?") ? "&" : "?") + "strict=" + (strictScene ? "1" : "0");
 }}
+
 function makeImage(sourceImage) {{
   const off = document.createElement("canvas");
   off.width = canvas.width;
   off.height = canvas.height;
+
   const offCtx = off.getContext("2d", {{ willReadFrequently: true }});
   syncContextQuality(offCtx);
+
   offCtx.fillStyle = "#000";
   offCtx.fillRect(0, 0, off.width, off.height);
+
   const fit = fitCover(sourceImage.width, sourceImage.height, off.width, off.height);
-  offCtx.drawImage(sourceImage, 0, 0, sourceImage.width, sourceImage.height, fit.x, fit.y, fit.w, fit.h);
+  offCtx.drawImage(
+    sourceImage,
+    0, 0,
+    sourceImage.width, sourceImage.height,
+    fit.x, fit.y,
+    fit.w, fit.h
+  );
+
   const imageData = offCtx.getImageData(0, 0, off.width, off.height);
   const data = imageData.data;
   const levels = 22;
   const step = 255 / (levels - 1);
+
   for (let i = 0; i < data.length; i += 4) {{
-    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
     let gray = 0.299 * r + 0.587 * g + 0.114 * b;
     gray = Math.round(gray / step) * step;
-    data[i] = gray; data[i + 1] = gray; data[i + 2] = gray; data[i + 3] = 255;
+    data[i] = gray;
+    data[i + 1] = gray;
+    data[i + 2] = gray;
+    data[i + 3] = 255;
   }}
+
   offCtx.putImageData(imageData, 0, 0);
   return off;
 }}
-function loadAndPrepare(src, strictScene) {{
-  return new Promise((resolve, reject) => {{
-    const img = new Image();
-    img.decoding = "async";
-    let done = false;
-    const timeout = setTimeout(() => {{ if (!done) {{ done = true; reject(new Error("timeout")); }} }}, LOAD_TIMEOUT_MS);
-    img.onload = () => {{
-      if (done) return;
-      done = true; clearTimeout(timeout);
-      try {{ resolve({{ src, prepared: makeImage(img) }}); }} catch (err) {{ reject(err); }}
-    }};
-    img.onerror = () => {{ if (!done) {{ done = true; clearTimeout(timeout); reject(new Error("image load failed")); }} }};
-    img.src = addStrictMode(src, strictScene);
-  }});
-}}
-async function prepareNext() {{
-  if (preparing || nextPrepared) return;
-  preparing = true;
-  try {{
-    for (let attempt = 0; attempt < 28; attempt++) {{
-      const src = getNextRandomSrc();
-      if (!src) break;
-      const strictScene = attempt < 14;
-      try {{
-        nextPrepared = await loadAndPrepare(src, strictScene);
-        preparing = false;
-        return;
-      }} catch (err) {{
-        if (strictScene) {{
-          try {{
-            nextPrepared = await loadAndPrepare(src, false);
-            preparing = false;
-            return;
-          }} catch (err2) {{ failedSrcs.add(src); }}
-        }} else {{ failedSrcs.add(src); }}
-      }}
-    }}
-  }} finally {{ preparing = false; }}
-}}
+
 function drawBlack() {{
   ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }}
+
 function drawFlashlight() {{
-  if (!currentPrepared) {{ drawBlack(); return; }}
+  if (!currentPrepared) {{
+    drawBlack();
+    return;
+  }}
+
   const radiusMultiplier = isTouchDevice() ? 0.145 : 0.070;
   const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * radiusMultiplier;
+
   ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
   const cutout = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius);
   cutout.addColorStop(0.00, "rgba(255,244,170,1.00)");
   cutout.addColorStop(0.20, "rgba(255,228,125,0.86)");
   cutout.addColorStop(0.50, "rgba(255,198,70,0.50)");
   cutout.addColorStop(0.82, "rgba(255,170,40,0.20)");
   cutout.addColorStop(1.00, "rgba(255,150,20,0.00)");
+
   ctx.globalCompositeOperation = "destination-out";
   ctx.fillStyle = cutout;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
   ctx.globalCompositeOperation = "destination-over";
   ctx.drawImage(currentPrepared, 0, 0, canvas.width, canvas.height);
+
   ctx.globalCompositeOperation = "source-over";
+
   const warm = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, radius * 1.12);
   warm.addColorStop(0.00, "rgba(255,210,75,0.42)");
   warm.addColorStop(0.45, "rgba(255,185,45,0.24)");
   warm.addColorStop(0.85, "rgba(255,155,20,0.10)");
   warm.addColorStop(1.00, "rgba(255,140,0,0.00)");
+
   ctx.fillStyle = warm;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }}
+
 function updateDebugUrl(src) {{
   if (!debugUrl || !src) return;
-  const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
+  const rawUrl = decodeURIComponent(src.replace("/proxy?url=", "").split("&strict=")[0]);
   debugUrl.textContent = rawUrl;
   debugUrl.dataset.url = rawUrl;
   debugUrl.title = "Click to copy: " + rawUrl;
 }}
-function showPrepared(item) {{
-  currentPrepared = item.prepared;
-  currentSrc = item.src;
-  recentlyShown.push(item.src);
-  if (recentlyShown.length > Math.min(140, Math.floor(slides.length * 0.55))) recentlyShown.shift();
-  updateDebugUrl(item.src);
+
+function showImage(img, src) {{
+  currentPrepared = makeImage(img);
+  currentSrc = src;
+
+  recentlyShown.push(src);
+  const maxRecent = Math.min(180, Math.max(30, Math.floor(slides.length * 0.7)));
+  if (recentlyShown.length > maxRecent) recentlyShown.shift();
+
+  updateDebugUrl(src);
   drawFlashlight();
 }}
-async function advanceSlide() {{
-  if (nextPrepared) {{
-    const item = nextPrepared;
-    nextPrepared = null;
-    showPrepared(item);
-    prepareNext();
+
+let loadingSlide = false;
+let lastSuccessfulChange = 0;
+
+function loadRandomSlide(attempts = 0) {{
+  if (loadingSlide && attempts === 0) return;
+
+  if (!slides.length) {{
+    drawBlack();
     return;
   }}
-  prepareNext();
-  if (!currentPrepared) {{
-    const wait = setInterval(() => {{
-      if (nextPrepared) {{ clearInterval(wait); advanceSlide(); }}
-    }}, 150);
+
+  if (attempts > 55) {{
+    loadingSlide = false;
+    failedSrcs.clear();
+    recentlyShown = [];
+    refillPool();
+    return;
   }}
+
+  loadingSlide = true;
+  const src = getNextRandomSrc();
+
+  if (!src) {{
+    loadingSlide = false;
+    refillPool();
+    return;
+  }}
+
+  const strictScene = attempts < 18;
+  const loader = new Image();
+  loader.decoding = "async";
+
+  let finished = false;
+  const timeout = setTimeout(() => {{
+    if (finished) return;
+    finished = true;
+    failedSrcs.add(src);
+    loadingSlide = false;
+    loadRandomSlide(attempts + 1);
+  }}, LOAD_TIMEOUT_MS);
+
+  loader.onload = () => {{
+    if (finished) return;
+    finished = true;
+    clearTimeout(timeout);
+
+    try {{
+      showImage(loader, src);
+      lastSuccessfulChange = Date.now();
+      loadingSlide = false;
+    }} catch (err) {{
+      failedSrcs.add(src);
+      loadingSlide = false;
+      loadRandomSlide(attempts + 1);
+    }}
+  }};
+
+  loader.onerror = () => {{
+    if (finished) return;
+    finished = true;
+    clearTimeout(timeout);
+
+    // If strict scene mode rejected it, try the same URL once as fallback.
+    if (strictScene) {{
+      const fallback = new Image();
+      fallback.decoding = "async";
+      let fallbackDone = false;
+      const fallbackTimeout = setTimeout(() => {{
+        if (fallbackDone) return;
+        fallbackDone = true;
+        failedSrcs.add(src);
+        loadingSlide = false;
+        loadRandomSlide(attempts + 1);
+      }}, LOAD_TIMEOUT_MS);
+
+      fallback.onload = () => {{
+        if (fallbackDone) return;
+        fallbackDone = true;
+        clearTimeout(fallbackTimeout);
+        try {{
+          showImage(fallback, src);
+          lastSuccessfulChange = Date.now();
+          loadingSlide = false;
+        }} catch (err) {{
+          failedSrcs.add(src);
+          loadingSlide = false;
+          loadRandomSlide(attempts + 1);
+        }}
+      }};
+
+      fallback.onerror = () => {{
+        if (fallbackDone) return;
+        fallbackDone = true;
+        clearTimeout(fallbackTimeout);
+        failedSrcs.add(src);
+        loadingSlide = false;
+        loadRandomSlide(attempts + 1);
+      }};
+
+      fallback.src = addStrictMode(src, false);
+      return;
+    }}
+
+    failedSrcs.add(src);
+    loadingSlide = false;
+    loadRandomSlide(attempts + 1);
+  }};
+
+  loader.src = addStrictMode(src, strictScene);
 }}
+
 function updatePointerFromEvent(e) {{
   const rect = canvas.getBoundingClientRect();
   const offsetY = isTouchDevice() ? window.innerHeight * 0.12 : 0;
@@ -754,10 +848,22 @@ function updatePointerFromEvent(e) {{
   mouseY = ((e.clientY - rect.top) - offsetY) * DPR;
   drawFlashlight();
 }}
-canvas.addEventListener("mousemove", (e) => {{ if (!isTouchDevice()) updatePointerFromEvent(e); }});
-canvas.addEventListener("pointerdown", (e) => {{ e.preventDefault(); updatePointerFromEvent(e); }});
-canvas.addEventListener("pointermove", (e) => {{ e.preventDefault(); updatePointerFromEvent(e); }});
-canvas.addEventListener("click", (e) => {{ e.preventDefault(); }});
+
+canvas.addEventListener("mousemove", (e) => {{
+  if (!isTouchDevice()) updatePointerFromEvent(e);
+}});
+canvas.addEventListener("pointerdown", (e) => {{
+  e.preventDefault();
+  updatePointerFromEvent(e);
+}});
+canvas.addEventListener("pointermove", (e) => {{
+  e.preventDefault();
+  updatePointerFromEvent(e);
+}});
+canvas.addEventListener("click", (e) => {{
+  e.preventDefault();
+}});
+
 if (debugUrl) {{
   debugUrl.addEventListener("click", async (e) => {{
     e.stopPropagation();
@@ -768,23 +874,39 @@ if (debugUrl) {{
       const oldText = debugUrl.textContent;
       debugUrl.textContent = "copied: " + url;
       setTimeout(() => {{ debugUrl.textContent = oldText; }}, 900);
-    }} catch (err) {{ window.prompt("Copy this image URL:", url); }}
+    }} catch (err) {{
+      window.prompt("Copy this image URL:", url);
+    }}
   }});
 }}
+
 window.addEventListener("resize", () => {{
   resizeCanvas();
   if (currentSrc) {{
-    const oldSrc = currentSrc;
-    loadAndPrepare(oldSrc, false).then(showPrepared).catch(() => drawFlashlight());
-  }} else {{ drawFlashlight(); }}
+    const img = new Image();
+    img.onload = () => showImage(img, currentSrc);
+    img.onerror = () => drawFlashlight();
+    img.src = addStrictMode(currentSrc, false);
+  }} else {{
+    drawFlashlight();
+  }}
 }});
+
 resizeCanvas();
 mouseX = canvas.width / 2;
 mouseY = canvas.height / 2;
 refillPool();
-prepareNext();
-advanceSlide();
-setInterval(advanceSlide, AUTO_ADVANCE_MS);
+loadRandomSlide();
+
+setInterval(() => {{
+  loadRandomSlide();
+}}, AUTO_ADVANCE_MS);
+
+setInterval(() => {{
+  // Safety: if the first image never loaded, keep trying.
+  if (!currentPrepared && !loadingSlide) loadRandomSlide();
+}}, 1200);
+
 setInterval(checkForFreshImages, IMAGE_REFRESH_MS);
 </script>
 </body>
