@@ -45,6 +45,8 @@ REJECT_CACHE_SECONDS = 1800
 KNOWN_BAD_URL_FRAGMENTS = [
     "p0l7jnbt",
     "p0kxxp17",
+    "p0n9y769",
+    "3a08bc10",
 ]
 
 
@@ -335,7 +337,7 @@ def image_has_center_divider(data):
     if w < 120 or h < 120:
         return False
 
-    target_w = 480
+    target_w = 560
     if w > target_w:
         scale = target_w / float(w)
         img = cv2.resize(img, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
@@ -343,31 +345,66 @@ def image_has_center_divider(data):
     h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
+    # Detect thin bright/white vertical graphic seams that run nearly top-to-bottom.
+    # This is intentionally stronger than the older center-only rule: BBC graphic
+    # cards often have one or two white lines that are slightly off-center.
+    search_min = int(w * 0.08)
+    search_max = int(w * 0.92)
+
+    bright = gray > 205
+    very_bright = gray > 232
+
+    for x in range(search_min, search_max):
+        narrow = very_bright[:, max(0, x - 1):min(w, x + 2)]
+        medium = bright[:, max(0, x - 2):min(w, x + 3)]
+
+        narrow_by_row = np.mean(narrow, axis=1) > 0.20
+        medium_by_row = np.mean(medium, axis=1) > 0.24
+
+        narrow_frac = float(np.mean(narrow_by_row))
+        medium_frac = float(np.mean(medium_by_row))
+
+        # Solid or almost-solid white line.
+        if narrow_frac > 0.48 or medium_frac > 0.58:
+            return True
+
+        # Dashed/gappy line that still spans most of the image.
+        if narrow_frac > 0.34 or medium_frac > 0.42:
+            combined = narrow_by_row | medium_by_row
+            transitions = np.diff(combined.astype(np.int8))
+            segment_count = int(np.sum(transitions == 1))
+            if segment_count <= 14:
+                return True
+
+    # Detect a sharp vertical edge paired with a bright seam, which catches lines
+    # that are not pure white after resizing/compression.
     grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     edge_strength = np.abs(grad_x)
     col_energy = edge_strength.mean(axis=0)
 
-    center_min = int(w * 0.35)
-    center_max = int(w * 0.65)
-
-    center_energy = col_energy[center_min:center_max]
-    if center_energy.size == 0:
+    search_energy = col_energy[search_min:search_max]
+    if search_energy.size == 0:
         return False
 
-    divider_x = center_min + int(np.argmax(center_energy))
-    peak_energy = float(col_energy[divider_x])
     baseline = float(np.median(col_energy)) + 1e-6
 
-    if peak_energy < baseline * 2.6:
-        return False
+    for offset, energy in enumerate(search_energy):
+        x = search_min + offset
+        if float(energy) < baseline * 1.85:
+            continue
 
-    col_slice = edge_strength[:, max(0, divider_x - 1):min(w, divider_x + 2)]
-    row_strength = col_slice.mean(axis=1)
-    row_baseline = float(np.median(row_strength)) + 1e-6
-    strong_frac = float(np.mean(row_strength > row_baseline * 1.8))
+        edge_band = edge_strength[:, max(0, x - 1):min(w, x + 2)]
+        edge_rows = edge_band.mean(axis=1)
+        edge_baseline = float(np.median(edge_rows)) + 1e-6
+        strong_frac = float(np.mean(edge_rows > edge_baseline * 1.45))
 
-    return strong_frac > 0.45
+        bright_band = bright[:, max(0, x - 3):min(w, x + 4)]
+        bright_frac = float(np.mean(np.mean(bright_band, axis=1) > 0.16))
 
+        if strong_frac > 0.32 and bright_frac > 0.22:
+            return True
+
+    return False
 
 def render_html():
     images = get_bbc_images(limit=MAX_IMAGE_POOL)
@@ -809,7 +846,7 @@ class Handler(BaseHTTPRequestHandler):
                             self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                             return
 
-                        cropped, did_crop = crop_top_if_needed(img)
+                        cropped, did_crop = crop_top_if_needed(img, url)
 
                         if cropped is not None and cropped.size > 0:
                             ok, encoded = cv2.imencode(".jpg", cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
