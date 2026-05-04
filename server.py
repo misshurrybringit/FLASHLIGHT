@@ -34,20 +34,21 @@ RSS_FEEDS = [
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-MAX_IMAGE_POOL = 900
-SEQUENCE_LENGTH = 700
-RSS_ITEMS_PER_FEED = 800
+MAX_IMAGE_POOL = 1400
+SEQUENCE_LENGTH = 1200
+AUTO_ADVANCE_MS = 5000
 
 IMAGE_CACHE = {"time": 0, "images": []}
-CACHE_SECONDS = 45
+CACHE_SECONDS = 35
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 320
+PROXY_CACHE_MAX_ITEMS = 420
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
 
+# Hard rejects: images/cards you never want anywhere.
 KNOWN_BAD_URL_FRAGMENTS = [
     "p0l7jnbt",
     "p0kxxp17",
@@ -56,39 +57,51 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "c5a74450",
     "f53b6250",
     "p0ngd4cc",
+    "acb55400",
 ]
 
-# These are allowed ONLY when the device is vertical/portrait.
-# On desktop or horizontal screens, JavaScript skips them.
+# These are not rejected; they are allowed only on vertical phone orientation.
+# This catches cropped/tall editorial images that look bad on computer/landscape.
 VERTICAL_ONLY_URL_FRAGMENTS = [
     "166137e0",
     "3600d2f0",
 ]
 
-# These get a small top crop for a BBC VOICE-style logo instead of rejection.
-VOICE_LOGO_CROP_FRAGMENTS = [
+# Special-case light crop for top-left VOICE logo.
+VOICE_TOP_CROP_FRAGMENTS = [
     "f16b6b80",
 ]
 
 
-def url_has_fragment(url, fragments):
+def url_matches_any(url, fragments):
     return any(fragment in url for fragment in fragments)
 
 
+def url_is_known_bad(url):
+    return url_matches_any(url, KNOWN_BAD_URL_FRAGMENTS)
+
+
 def url_is_vertical_only(url):
-    return url_has_fragment(url, VERTICAL_ONLY_URL_FRAGMENTS)
+    return url_matches_any(url, VERTICAL_ONLY_URL_FRAGMENTS)
+
+
+def url_needs_voice_crop(url):
+    return url_matches_any(url, VOICE_TOP_CROP_FRAGMENTS)
 
 
 def upgrade_bbc_image_url(url):
     if not url:
         return url
+
     url = url.replace("/240/", "/1024/")
     url = url.replace("/320/", "/1024/")
     url = url.replace("/480/", "/1024/")
     url = url.replace("/624/", "/1024/")
     url = url.replace("/660/", "/1024/")
+
     url = re.sub(r"/ic/\d+x\d+/", "/ic/1024x576/", url)
     url = re.sub(r"/standard/\d+/", "/standard/1024/", url)
+
     return url
 
 
@@ -106,14 +119,15 @@ def fetch_bytes(url, timeout=8):
 
 def cleanup_cache(cache, max_age):
     now = time.time()
-    for key in list(cache.keys()):
-        if now - cache[key]["time"] > max_age:
-            cache.pop(key, None)
+    for k in list(cache.keys()):
+        if now - cache[k]["time"] > max_age:
+            cache.pop(k, None)
 
 
 def cleanup_proxy_cache():
     cleanup_cache(PROXY_CACHE, PROXY_CACHE_SECONDS)
     cleanup_cache(REJECT_CACHE, REJECT_CACHE_SECONDS)
+
     if len(PROXY_CACHE) > PROXY_CACHE_MAX_ITEMS:
         oldest = sorted(PROXY_CACHE.items(), key=lambda kv: kv[1]["time"])
         for key, _ in oldest[:len(PROXY_CACHE) - PROXY_CACHE_MAX_ITEMS]:
@@ -143,15 +157,17 @@ def extract_rss_item_image(item):
 
     description = item.find("description")
     if description is not None and description.text:
-        match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', description.text, re.IGNORECASE)
-        if match:
-            return upgrade_bbc_image_url(match.group(1))
+        m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', description.text, re.IGNORECASE)
+        if m:
+            return upgrade_bbc_image_url(m.group(1))
+
     return None
 
 
 def get_bbc_images(limit=MAX_IMAGE_POOL, force_refresh=False):
     now = time.time()
-    if not force_refresh and IMAGE_CACHE["images"] and now - IMAGE_CACHE["time"] < CACHE_SECONDS:
+
+    if (not force_refresh) and IMAGE_CACHE["images"] and now - IMAGE_CACHE["time"] < CACHE_SECONDS:
         cached = IMAGE_CACHE["images"][:]
         random.shuffle(cached)
         return cached[:limit]
@@ -167,36 +183,50 @@ def get_bbc_images(limit=MAX_IMAGE_POOL, force_refresh=False):
             root = ET.fromstring(rss)
             items = root.findall(".//item")
             random.shuffle(items)
-            for item in items[:RSS_ITEMS_PER_FEED]:
+
+            for item in items[:900]:
                 if len(images) >= limit:
                     break
+
                 img = extract_rss_item_image(item)
                 if not img:
                     continue
-                if url_has_fragment(img, KNOWN_BAD_URL_FRAGMENTS):
+
+                if url_is_known_bad(img):
                     continue
+
                 if img in seen:
                     continue
+
                 rejected = REJECT_CACHE.get(img)
                 if rejected and now - rejected["time"] < REJECT_CACHE_SECONDS:
                     continue
+
                 seen.add(img)
                 images.append(img)
+
         except Exception:
             continue
 
     random.shuffle(images)
     IMAGE_CACHE["time"] = now
     IMAGE_CACHE["images"] = images[:]
+
     return images[:limit]
 
 
 def build_slide_sequence(force_refresh=False):
+    images = get_bbc_images(limit=MAX_IMAGE_POOL, force_refresh=force_refresh)
+    random.shuffle(images)
+
     sequence = []
-    for img in get_bbc_images(limit=MAX_IMAGE_POOL, force_refresh=force_refresh):
+    for img in images:
         proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
-        sequence.append({"src": proxied, "verticalOnly": url_is_vertical_only(img)})
-    random.shuffle(sequence)
+        sequence.append({
+            "src": proxied,
+            "verticalOnly": url_is_vertical_only(img),
+        })
+
     return sequence
 
 
@@ -206,25 +236,45 @@ def image_is_probably_full_graphic_page(data):
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     except Exception:
         return False
+
     if img is None or img.size == 0:
         return False
+
     h, w = img.shape[:2]
+
     if max(w, h) > 900:
         scale = 900.0 / max(w, h)
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
     gray_std = float(np.std(gray))
     mean_brightness = float(np.mean(gray))
     edges = cv2.Canny(gray, 70, 170)
     edge_density = float(np.mean(edges > 0))
-    small = cv2.resize(img, (100, max(56, int(img.shape[0] * 100 / img.shape[1]))), interpolation=cv2.INTER_AREA)
+
+    small = cv2.resize(
+        img,
+        (100, max(56, int(img.shape[0] * 100 / img.shape[1]))),
+        interpolation=cv2.INTER_AREA,
+    )
     unique_colors = len(np.unique(small.reshape(-1, 3), axis=0))
 
-    blue_mask = (hsv[:, :, 0] > 98) & (hsv[:, :, 0] < 138) & (hsv[:, :, 1] > 80) & (hsv[:, :, 2] > 45)
-    green_mask = (hsv[:, :, 0] > 42) & (hsv[:, :, 0] < 90) & (hsv[:, :, 1] > 85) & (hsv[:, :, 2] > 55)
+    blue_mask = (
+        (hsv[:, :, 0] > 98)
+        & (hsv[:, :, 0] < 138)
+        & (hsv[:, :, 1] > 80)
+        & (hsv[:, :, 2] > 45)
+    )
+    green_mask = (
+        (hsv[:, :, 0] > 42)
+        & (hsv[:, :, 0] < 90)
+        & (hsv[:, :, 1] > 85)
+        & (hsv[:, :, 2] > 55)
+    )
     white_mask = gray > 215
+
     blue_frac = float(np.mean(blue_mask))
     green_frac = float(np.mean(green_mask))
     white_frac = float(np.mean(white_mask))
@@ -241,33 +291,53 @@ def image_is_probably_full_graphic_page(data):
         return True
     if gray_std < 36 and edge_density > 0.07:
         return True
+
     return False
 
 
 def top_has_bbc_branding(img):
     if img is None or img.size == 0:
         return False
+
     try:
         h, w = img.shape[:2]
-        top = img[:max(1, int(h * 0.42)), :]
+        top_h = max(1, int(h * 0.42))
+        top = img[:top_h, :]
+
         hsv = cv2.cvtColor(top, cv2.COLOR_BGR2HSV)
         gray = cv2.cvtColor(top, cv2.COLOR_BGR2GRAY)
-        blue_mask = (hsv[:, :, 0] > 98) & (hsv[:, :, 0] < 138) & (hsv[:, :, 1] > 70) & (hsv[:, :, 2] > 40)
-        green_mask = (hsv[:, :, 0] > 42) & (hsv[:, :, 0] < 92) & (hsv[:, :, 1] > 75) & (hsv[:, :, 2] > 50)
+
+        blue_mask = (
+            (hsv[:, :, 0] > 98)
+            & (hsv[:, :, 0] < 138)
+            & (hsv[:, :, 1] > 70)
+            & (hsv[:, :, 2] > 40)
+        )
+        green_mask = (
+            (hsv[:, :, 0] > 42)
+            & (hsv[:, :, 0] < 92)
+            & (hsv[:, :, 1] > 75)
+            & (hsv[:, :, 2] > 50)
+        )
         white_mask = gray > 210
+
         blue_frac = float(np.mean(blue_mask))
         green_frac = float(np.mean(green_mask))
         white_frac = float(np.mean(white_mask))
+
         edges = cv2.Canny(gray, 55, 150)
         edge_density = float(np.mean(edges > 0))
         gray_std = float(np.std(gray))
+
         if blue_frac > 0.025 and white_frac > 0.018:
             return True
         if green_frac > 0.0025 and white_frac > 0.016:
             return True
         if edge_density > 0.095 and gray_std < 86 and white_frac > 0.012:
             return True
+
         return False
+
     except Exception:
         return False
 
@@ -275,19 +345,26 @@ def top_has_bbc_branding(img):
 def crop_top_if_needed(img, url=""):
     if img is None or img.size == 0:
         return img, False
+
     try:
         h, w = img.shape[:2]
-        if url_has_fragment(url, VOICE_LOGO_CROP_FRAGMENTS):
-            cropped = img[int(h * 0.11):, :]
+
+        if url_needs_voice_crop(url):
+            crop_y = int(h * 0.11)
+            cropped = img[crop_y:, :]
             if cropped is not None and cropped.size > 0:
                 return cropped, True
 
         if not top_has_bbc_branding(img):
             return img, False
-        cropped = img[int(h * 0.24):, :]
+
+        crop_y = int(h * 0.24)
+        cropped = img[crop_y:, :]
         if cropped is None or cropped.size == 0:
             return img, False
+
         return cropped, True
+
     except Exception:
         return img, False
 
@@ -298,148 +375,111 @@ def image_has_center_divider(data):
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     except Exception:
         return False
+
     if img is None or img.size == 0:
         return False
+
     h, w = img.shape[:2]
     if w < 120 or h < 120:
         return False
+
     target_w = 520
     if w > target_w:
         scale = target_w / float(w)
         img = cv2.resize(img, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
+
     h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    bright = gray > 218
-    center_min = int(w * 0.18)
-    center_max = int(w * 0.82)
-    for x in range(center_min, center_max):
-        band = bright[:, max(0, x - 1):min(w, x + 2)]
-        bright_by_row = np.mean(band, axis=1) > 0.45
-        full_height_frac = float(np.mean(bright_by_row))
-        if full_height_frac > 0.58:
-            return True
-        if full_height_frac > 0.42:
-            transitions = np.diff(bright_by_row.astype(np.int8))
-            if int(np.sum(transitions == 1)) <= 8:
+
+    # Bright thin vertical seams anywhere in the middle 80% of the image.
+    white = gray > 218
+    col_white = white.mean(axis=0)
+    middle_min = int(w * 0.10)
+    middle_max = int(w * 0.90)
+    if middle_max > middle_min:
+        for x in range(middle_min, middle_max):
+            band = white[:, max(0, x - 1):min(w, x + 2)]
+            if band.size and float(np.mean(band)) > 0.26:
                 return True
 
     grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     edge_strength = np.abs(grad_x)
     col_energy = edge_strength.mean(axis=0)
+
+    center_min = int(w * 0.18)
+    center_max = int(w * 0.82)
     center_energy = col_energy[center_min:center_max]
     if center_energy.size == 0:
         return False
+
     divider_x = center_min + int(np.argmax(center_energy))
     peak_energy = float(col_energy[divider_x])
     baseline = float(np.median(col_energy)) + 1e-6
-    if peak_energy < baseline * 2.2:
+
+    if peak_energy < baseline * 2.25:
         return False
+
     col_slice = edge_strength[:, max(0, divider_x - 1):min(w, divider_x + 2)]
     row_strength = col_slice.mean(axis=1)
     row_baseline = float(np.median(row_strength)) + 1e-6
-    strong_frac = float(np.mean(row_strength > row_baseline * 1.55))
-    return strong_frac > 0.38
+    strong_frac = float(np.mean(row_strength > row_baseline * 1.65))
+
+    return strong_frac > 0.36
 
 
 def image_is_overcropped_subject(data):
+    """Reject isolated/cropped subjects on plain backgrounds. Keep this modest so the pool is not starved."""
     try:
         arr = np.frombuffer(data, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     except Exception:
         return False
+
     if img is None or img.size == 0:
         return False
+
     h, w = img.shape[:2]
-    if max(w, h) > 700:
-        scale = 700.0 / max(w, h)
-        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-        h, w = img.shape[:2]
 
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (21, 21), 0)
-    edges = cv2.Canny(blur, 40, 120)
-    edge_density = float(np.mean(edges > 0))
-    center = gray[int(h * 0.2):int(h * 0.8), int(w * 0.2):int(w * 0.8)]
-    outer = gray.copy()
-    outer[int(h * 0.2):int(h * 0.8), int(w * 0.2):int(w * 0.8)] = 0
-    center_std = float(np.std(center)) if center.size else 0.0
-    outer_std = float(np.std(outer)) + 1e-6
-    small = cv2.resize(img, (80, 80), interpolation=cv2.INTER_AREA)
-    unique_colors = len(np.unique(small.reshape(-1, 3), axis=0))
-    low_sat = hsv[:, :, 1] < 38
-    bright = hsv[:, :, 2] > 150
-    plain_bg_frac = float(np.mean(low_sat & bright))
-
-    if plain_bg_frac > 0.24 and edge_density < 0.09:
-        return True
-    if unique_colors < 1700 and edge_density < 0.085:
-        return True
-    if center_std > outer_std * 1.9 and edge_density < 0.11:
-        return True
-    return False
-
-
-def image_is_close_subject_not_scene(data):
-    try:
-        arr = np.frombuffer(data, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    except Exception:
-        return False
-    if img is None or img.size == 0:
-        return False
-    h, w = img.shape[:2]
-    if w < 160 or h < 120:
-        return False
     if max(w, h) > 720:
         scale = 720.0 / max(w, h)
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
         h, w = img.shape[:2]
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    ycrcb = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
-    edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 45, 135)
-    edge = edges > 0
-    center = edge[int(h * 0.14):int(h * 0.86), int(w * 0.18):int(w * 0.82)]
-    outer = edge.copy()
-    outer[int(h * 0.14):int(h * 0.86), int(w * 0.18):int(w * 0.82)] = False
-    center_edge = float(np.mean(center)) if center.size else 0.0
-    outer_edge = float(np.mean(outer)) + 1e-6
-    total_edge = float(np.mean(edge))
-    y = ycrcb[:, :, 0]
-    cr = ycrcb[:, :, 1]
-    cb = ycrcb[:, :, 2]
-    skin = (y > 45) & (cr > 132) & (cr < 178) & (cb > 78) & (cb < 135)
-    upper_center_skin = skin[int(h * 0.05):int(h * 0.72), int(w * 0.22):int(w * 0.78)]
-    skin_frac_upper_center = float(np.mean(upper_center_skin)) if upper_center_skin.size else 0.0
-    skin_frac_total = float(np.mean(skin))
-    sat = hsv[:, :, 1]
-    val = hsv[:, :, 2]
-    low_context = ((sat < 45) & (val > 105)) | (val < 38)
-    low_context_frac = float(np.mean(low_context))
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    if center_edge > outer_edge * 2.35 and total_edge < 0.105:
+    blur = cv2.GaussianBlur(gray, (17, 17), 0)
+    edges = cv2.Canny(blur, 38, 120)
+    edge_density = float(np.mean(edges > 0))
+
+    small = cv2.resize(img, (80, 80), interpolation=cv2.INTER_AREA)
+    unique_colors = len(np.unique(small.reshape(-1, 3), axis=0))
+
+    low_sat = hsv[:, :, 1] < 40
+    bright = hsv[:, :, 2] > 150
+    plain_bg_frac = float(np.mean(low_sat & bright))
+
+    # Only strong plain-background cases. More subtle vertical cases are handled client-side by orientation.
+    if plain_bg_frac > 0.48 and edge_density < 0.055:
         return True
-    if skin_frac_upper_center > 0.075 and center_edge > outer_edge * 1.55 and total_edge < 0.13:
+    if unique_colors < 850 and edge_density < 0.042:
         return True
-    if skin_frac_total > 0.16 and outer_edge < 0.030 and total_edge < 0.12:
-        return True
-    if low_context_frac > 0.52 and center_edge > outer_edge * 1.75 and total_edge < 0.115:
-        return True
+
     return False
 
 
 def render_html():
-    sequence_json = json.dumps(build_slide_sequence(force_refresh=False))
-    return """<!DOCTYPE html>
+    sequence = build_slide_sequence(force_refresh=False)
+    sequence_json = json.dumps(sequence)
+
+    return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <title>misshurry</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
-html, body {
+html, body {{
   margin: 0;
   padding: 0;
   width: 100%;
@@ -452,160 +492,182 @@ html, body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-}
-canvas {
+}}
+canvas {{
   display: block;
   width: 100vw;
   height: 100vh;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-}
+}}
+#debug-url {{
+  position: fixed;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 92vw;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: rgba(255,255,255,0.48);
+  background: rgba(0,0,0,0.28);
+  font: 10px monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 10;
+  user-select: text;
+  cursor: copy;
+}}
+#debug-url:hover {{
+  color: rgba(255,255,255,0.92);
+  background: rgba(0,0,0,0.62);
+}}
 </style>
 </head>
 <body>
 <canvas id="view"></canvas>
+<div id="debug-url" title="Click to copy image URL"></div>
 <script>
-let slides = __SEQUENCE_JSON__;
-const SEQUENCE_LENGTH_JS = __SEQUENCE_LENGTH__;
-const AUTO_ADVANCE_MS = 5000;
+let slides = {sequence_json};
+const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
+const AUTO_ADVANCE_MS = {AUTO_ADVANCE_MS};
 const IMAGE_REFRESH_MS = 60000;
 const LOAD_TIMEOUT_MS = 6500;
 
 const canvas = document.getElementById("view");
-const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: false });
+const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
+const debugUrl = document.getElementById("debug-url");
 
 let DPR = 1;
 let mouseX = 0;
 let mouseY = 0;
-let currentPrepared = null;
-let currentSrc = null;
-let loadingSlide = false;
 let shuffledPool = [];
 let poolIndex = 0;
 let failedSrcs = new Set();
 let recentlyShown = [];
+let currentPrepared = null;
+let currentImage = null;
+let currentSrc = null;
+let loadingSlide = false;
 
-function isTouchDevice() {
+function isTouchDevice() {{
   return window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-}
+}}
 
-function deviceIsVertical() {
-  return window.innerHeight > window.innerWidth;
-}
+function phoneIsPortrait() {{
+  return isTouchDevice() && window.innerHeight > window.innerWidth;
+}}
 
-function slideAllowedForDevice(slide) {
-  return !(slide.verticalOnly && !deviceIsVertical());
-}
+function deviceAllowsVerticalOnly() {{
+  return phoneIsPortrait();
+}}
 
-function syncContextQuality(targetCtx) {
-  targetCtx.imageSmoothingEnabled = true;
-  targetCtx.imageSmoothingQuality = "high";
-}
-
-function resizeCanvas() {
-  DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, isTouchDevice() ? 1.2 : 1.45));
-  canvas.width = Math.round(window.innerWidth * DPR);
-  canvas.height = Math.round(window.innerHeight * DPR);
-  canvas.style.width = window.innerWidth + "px";
-  canvas.style.height = window.innerHeight + "px";
-  syncContextQuality(ctx);
-  if (!mouseX && !mouseY) {
-    mouseX = canvas.width / 2;
-    mouseY = canvas.height / 2;
-  }
-}
-
-function fitCover(sw, sh, dw, dh) {
-  const scale = Math.max(dw / sw, dh / sh);
-  const w = sw * scale;
-  const h = sh * scale;
-  return { x: (dw - w) / 2, y: (dh - h) * 0.42, w, h };
-}
-
-function shuffleArray(arr) {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function normalizeSlideList(newSlides) {
+function normalizeSlideList(newSlides) {{
   if (!Array.isArray(newSlides)) return [];
   return newSlides
     .filter(s => s && typeof s.src === "string" && s.src.length)
-    .map(s => ({ src: s.src, verticalOnly: !!s.verticalOnly }));
-}
+    .map(s => ({{ src: s.src, verticalOnly: Boolean(s.verticalOnly) }}));
+}}
 
-function mergeFreshSlides(newSlides) {
-  const incoming = normalizeSlideList(newSlides);
-  if (!incoming.length) return;
-  const existing = new Set(slides.map(s => s.src));
-  const added = [];
-  for (const slide of incoming) {
-    if (!existing.has(slide.src)) {
-      existing.add(slide.src);
-      added.push(slide);
-    }
-  }
-  if (!added.length) return;
-  slides = shuffleArray(added).concat(slides);
-  if (slides.length > SEQUENCE_LENGTH_JS * 2) slides = slides.slice(0, SEQUENCE_LENGTH_JS * 2);
-  refillPool();
-}
+slides = normalizeSlideList(slides);
 
-async function checkForFreshImages() {
-  try {
-    const response = await fetch("/images?ts=" + Date.now(), { cache: "no-store" });
-    if (!response.ok) return;
-    mergeFreshSlides(await response.json());
-  } catch (err) {}
-}
+function syncContextQuality(targetCtx) {{
+  targetCtx.imageSmoothingEnabled = true;
+  targetCtx.imageSmoothingQuality = "medium";
+}}
 
-function refillPool() {
+function resizeCanvas() {{
+  DPR = isTouchDevice() ? 1 : Math.max(1, Math.min(window.devicePixelRatio || 1, 1.35));
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  canvas.width = Math.round(w * DPR);
+  canvas.height = Math.round(h * DPR);
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  syncContextQuality(ctx);
+  if (!mouseX && !mouseY) {{
+    mouseX = canvas.width / 2;
+    mouseY = canvas.height / 2;
+  }}
+}}
+
+function fitCover(sw, sh, dw, dh) {{
+  const scale = Math.max(dw / sw, dh / sh);
+  const w = sw * scale;
+  const h = sh * scale;
+  return {{
+    x: (dw - w) / 2,
+    y: (dh - h) * 0.42,
+    w,
+    h
+  }};
+}}
+
+function shuffleArray(arr) {{
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {{
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }}
+  return a;
+}}
+
+function slideAllowedByOrientation(slide) {{
+  return !slide.verticalOnly || deviceAllowsVerticalOnly();
+}}
+
+function imageLooksVerticalish(img) {{
+  return img.height >= img.width * 0.92;
+}}
+
+function imageAllowedByOrientation(img, slide) {{
+  if (deviceAllowsVerticalOnly()) return true;
+  if (slide && slide.verticalOnly) return false;
+  // Extra safety: computer/landscape skips vertical-ish images even if we have not tagged the URL yet.
+  if (imageLooksVerticalish(img)) return false;
+  return true;
+}}
+
+function refillPool() {{
   let candidates = slides
-    .filter(slideAllowedForDevice)
-    .map(s => s.src)
-    .filter(src => !failedSrcs.has(src));
+    .filter(s => slideAllowedByOrientation(s))
+    .filter(s => !failedSrcs.has(s.src));
 
-  if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
-  if (recentlyShown.length && candidates.length > recentlyShown.length + 8) {
+  if (currentSrc && candidates.length > 1) candidates = candidates.filter(s => s.src !== currentSrc);
+
+  if (recentlyShown.length && candidates.length > recentlyShown.length + 8) {{
     const recent = new Set(recentlyShown);
-    candidates = candidates.filter(src => !recent.has(src));
-  }
+    candidates = candidates.filter(s => !recent.has(s.src));
+  }}
+
   shuffledPool = shuffleArray(candidates).slice(0, SEQUENCE_LENGTH_JS);
   poolIndex = 0;
 
-  if (!shuffledPool.length) {
+  if (!shuffledPool.length && slides.length) {{
     failedSrcs.clear();
     recentlyShown = [];
-    candidates = slides.filter(slideAllowedForDevice).map(s => s.src);
-    shuffledPool = shuffleArray(candidates).slice(0, SEQUENCE_LENGTH_JS);
-  }
-}
+    shuffledPool = shuffleArray(slides.filter(s => slideAllowedByOrientation(s))).slice(0, SEQUENCE_LENGTH_JS);
+  }}
+}}
 
-function getNextRandomSrc() {
+function getNextSlide() {{
   if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool();
   if (!shuffledPool.length) return null;
-  const src = shuffledPool[poolIndex];
+  const slide = shuffledPool[poolIndex];
   poolIndex += 1;
-  return src;
-}
+  return slide;
+}}
 
-function addStrictMode(src, strictScene) {
-  return src + (src.includes("?") ? "&" : "?") + "strict=" + (strictScene ? "1" : "0");
-}
-
-function makeImage(sourceImage) {
+function makeImage(sourceImage) {{
   const off = document.createElement("canvas");
   off.width = canvas.width;
   off.height = canvas.height;
-  const offCtx = off.getContext("2d", { willReadFrequently: true });
+  const offCtx = off.getContext("2d", {{ willReadFrequently: true }});
   syncContextQuality(offCtx);
   offCtx.fillStyle = "#000";
   offCtx.fillRect(0, 0, off.width, off.height);
+
   const fit = fitCover(sourceImage.width, sourceImage.height, off.width, off.height);
   offCtx.drawImage(sourceImage, 0, 0, sourceImage.width, sourceImage.height, fit.x, fit.y, fit.w, fit.h);
 
@@ -613,7 +675,8 @@ function makeImage(sourceImage) {
   const data = imageData.data;
   const levels = 22;
   const step = 255 / (levels - 1);
-  for (let i = 0; i < data.length; i += 4) {
+
+  for (let i = 0; i < data.length; i += 4) {{
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
@@ -623,24 +686,26 @@ function makeImage(sourceImage) {
     data[i + 1] = gray;
     data[i + 2] = gray;
     data[i + 3] = 255;
-  }
+  }}
+
   offCtx.putImageData(imageData, 0, 0);
   return off;
-}
+}}
 
-function drawBlack() {
+function drawBlack() {{
   ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-}
+}}
 
-function drawFlashlight() {
-  if (!currentPrepared) {
+function drawFlashlight() {{
+  if (!currentPrepared) {{
     drawBlack();
     return;
-  }
-  const radiusMultiplier = isTouchDevice() ? 0.155 : 0.070;
+  }}
+
+  const radiusMultiplier = isTouchDevice() ? 0.145 : 0.070;
   const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * radiusMultiplier;
 
   ctx.globalCompositeOperation = "source-over";
@@ -670,145 +735,175 @@ function drawFlashlight() {
   warm.addColorStop(1.00, "rgba(255,140,0,0.00)");
   ctx.fillStyle = warm;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-}
+}}
 
-function showImage(img, src) {
-  currentPrepared = makeImage(img);
+function updateDebugUrl(src) {{
+  if (!debugUrl || !src) return;
+  const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
+  debugUrl.textContent = rawUrl;
+  debugUrl.dataset.url = rawUrl;
+  debugUrl.title = "Click to copy: " + rawUrl;
+}}
+
+function showImage(img, src) {{
+  currentImage = img;
   currentSrc = src;
+  currentPrepared = makeImage(img);
   recentlyShown.push(src);
-  const maxRecent = Math.min(220, Math.max(35, Math.floor(slides.length * 0.6)));
+  const maxRecent = Math.min(220, Math.max(35, Math.floor(slides.length * 0.65)));
   if (recentlyShown.length > maxRecent) recentlyShown.shift();
+  updateDebugUrl(src);
   drawFlashlight();
-}
+}}
 
-function loadRandomSlide(attempts = 0) {
+function loadRandomSlide(attempts = 0) {{
   if (loadingSlide && attempts === 0) return;
-  if (!slides.length) return;
-  if (attempts > 60) {
+
+  if (!slides.length) {{
+    if (!currentPrepared) drawBlack();
+    return;
+  }}
+
+  if (attempts > 60) {{
     loadingSlide = false;
     failedSrcs.clear();
     recentlyShown = [];
     refillPool();
     return;
-  }
+  }}
 
   loadingSlide = true;
-  const src = getNextRandomSrc();
-  if (!src) {
+  const slide = getNextSlide();
+  if (!slide) {{
     loadingSlide = false;
     refillPool();
     return;
-  }
+  }}
 
-  const strictScene = attempts < 18;
   const loader = new Image();
   loader.decoding = "async";
-  let done = false;
 
-  const timeout = setTimeout(() => {
-    if (done) return;
-    done = true;
-    failedSrcs.add(src);
+  let finished = false;
+  const timeout = setTimeout(() => {{
+    if (finished) return;
+    finished = true;
+    failedSrcs.add(slide.src);
     loadingSlide = false;
     loadRandomSlide(attempts + 1);
-  }, LOAD_TIMEOUT_MS);
+  }}, LOAD_TIMEOUT_MS);
 
-  loader.onload = () => {
-    if (done) return;
-    done = true;
+  loader.onload = () => {{
+    if (finished) return;
+    finished = true;
     clearTimeout(timeout);
-    try {
-      showImage(loader, src);
-      loadingSlide = false;
-    } catch (err) {
-      failedSrcs.add(src);
+
+    if (!imageAllowedByOrientation(loader, slide)) {{
+      failedSrcs.add(slide.src);
       loadingSlide = false;
       loadRandomSlide(attempts + 1);
-    }
-  };
-
-  loader.onerror = () => {
-    if (done) return;
-    done = true;
-    clearTimeout(timeout);
-    if (strictScene) {
-      const fallback = new Image();
-      fallback.decoding = "async";
-      fallback.onload = () => {
-        try {
-          showImage(fallback, src);
-        } catch (err) {
-          failedSrcs.add(src);
-        }
-        loadingSlide = false;
-      };
-      fallback.onerror = () => {
-        failedSrcs.add(src);
-        loadingSlide = false;
-        loadRandomSlide(attempts + 1);
-      };
-      fallback.src = addStrictMode(src, false);
       return;
-    }
-    failedSrcs.add(src);
+    }}
+
+    try {{
+      showImage(loader, slide.src);
+    }} catch (err) {{
+      failedSrcs.add(slide.src);
+      loadingSlide = false;
+      loadRandomSlide(attempts + 1);
+      return;
+    }}
+
+    loadingSlide = false;
+  }};
+
+  loader.onerror = () => {{
+    if (finished) return;
+    finished = true;
+    clearTimeout(timeout);
+    failedSrcs.add(slide.src);
     loadingSlide = false;
     loadRandomSlide(attempts + 1);
-  };
+  }};
 
-  loader.src = addStrictMode(src, strictScene);
-}
+  loader.src = slide.src;
+}}
 
-function updatePointerFromEvent(e) {
+async function refreshImagePool() {{
+  try {{
+    const response = await fetch("/images?ts=" + Date.now(), {{ cache: "no-store" }});
+    if (!response.ok) return;
+    const fresh = normalizeSlideList(await response.json());
+    const existing = new Set(slides.map(s => s.src));
+    const added = [];
+    for (const slide of fresh) {{
+      if (!existing.has(slide.src)) {{
+        existing.add(slide.src);
+        added.push(slide);
+      }}
+    }}
+    if (!added.length) return;
+    slides = shuffleArray(added).concat(slides);
+    if (slides.length > SEQUENCE_LENGTH_JS * 2) slides = slides.slice(0, SEQUENCE_LENGTH_JS * 2);
+    refillPool();
+  }} catch (err) {{
+    // quiet fail
+  }}
+}}
+
+function moveFlashlightToClientPoint(clientX, clientY) {{
   const rect = canvas.getBoundingClientRect();
-  const touchOffset = isTouchDevice() ? window.innerHeight * 0.12 : 0;
-  mouseX = (e.clientX - rect.left) * DPR;
-  mouseY = ((e.clientY - rect.top) - touchOffset) * DPR;
+  const offsetY = isTouchDevice() ? window.innerHeight * 0.12 : 0;
+  mouseX = (clientX - rect.left) * DPR;
+  mouseY = ((clientY - rect.top) - offsetY) * DPR;
   drawFlashlight();
-}
+}}
 
-canvas.addEventListener("mousemove", (e) => {
-  if (!isTouchDevice()) updatePointerFromEvent(e);
-}, { passive: false });
-
-canvas.addEventListener("pointerdown", (e) => {
+canvas.addEventListener("mousemove", (e) => {{
+  if (!isTouchDevice()) moveFlashlightToClientPoint(e.clientX, e.clientY);
+}});
+canvas.addEventListener("pointerdown", (e) => {{
   e.preventDefault();
-  if (canvas.setPointerCapture) {
-    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
-  }
-  updatePointerFromEvent(e);
-}, { passive: false });
-
-canvas.addEventListener("pointermove", (e) => {
+  moveFlashlightToClientPoint(e.clientX, e.clientY);
+}}, {{ passive: false }});
+canvas.addEventListener("pointermove", (e) => {{
   e.preventDefault();
-  updatePointerFromEvent(e);
-}, { passive: false });
-
-canvas.addEventListener("touchstart", (e) => {
+  moveFlashlightToClientPoint(e.clientX, e.clientY);
+}}, {{ passive: false }});
+canvas.addEventListener("pointerup", (e) => {{
   e.preventDefault();
-  if (e.touches && e.touches[0]) updatePointerFromEvent(e.touches[0]);
-}, { passive: false });
-
-canvas.addEventListener("touchmove", (e) => {
+}}, {{ passive: false }});
+canvas.addEventListener("click", (e) => {{
+  // Timer-only slideshow. Clicks do NOT change images.
   e.preventDefault();
-  if (e.touches && e.touches[0]) updatePointerFromEvent(e.touches[0]);
-}, { passive: false });
+}}, {{ passive: false }});
 
-canvas.addEventListener("click", (e) => {
-  e.preventDefault();
-}, { passive: false });
+if (debugUrl) {{
+  debugUrl.addEventListener("click", async (e) => {{
+    e.stopPropagation();
+    const url = debugUrl.dataset.url || debugUrl.textContent || "";
+    if (!url) return;
+    try {{
+      await navigator.clipboard.writeText(url);
+      const oldText = debugUrl.textContent;
+      debugUrl.textContent = "copied: " + url;
+      setTimeout(() => {{ debugUrl.textContent = oldText; }}, 900);
+    }} catch (err) {{
+      window.prompt("Copy this image URL:", url);
+    }}
+  }});
+}}
 
-window.addEventListener("resize", () => {
+window.addEventListener("resize", () => {{
   resizeCanvas();
+  failedSrcs.clear();
   refillPool();
-  if (currentSrc) {
-    const img = new Image();
-    img.onload = () => showImage(img, currentSrc);
-    img.onerror = () => drawFlashlight();
-    img.src = addStrictMode(currentSrc, false);
-  } else {
+  if (currentImage && imageAllowedByOrientation(currentImage, {{ src: currentSrc, verticalOnly: false }})) {{
+    currentPrepared = makeImage(currentImage);
     drawFlashlight();
-  }
-});
+  }} else {{
+    loadRandomSlide();
+  }}
+}});
 
 resizeCanvas();
 mouseX = canvas.width / 2;
@@ -816,12 +911,12 @@ mouseY = canvas.height / 2;
 refillPool();
 loadRandomSlide();
 setInterval(loadRandomSlide, AUTO_ADVANCE_MS);
-setInterval(checkForFreshImages, IMAGE_REFRESH_MS);
-setInterval(() => { if (!currentPrepared && !loadingSlide) loadRandomSlide(); }, 1200);
+setInterval(refreshImagePool, IMAGE_REFRESH_MS);
+setInterval(() => {{ if (!currentPrepared && !loadingSlide) loadRandomSlide(); }}, 1500);
 </script>
 </body>
 </html>
-""".replace("__SEQUENCE_JSON__", sequence_json).replace("__SEQUENCE_LENGTH__", str(SEQUENCE_LENGTH))
+"""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -839,11 +934,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(status_code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
+
             if extra_headers:
                 for key, value in extra_headers.items():
                     self.send_header(key, value)
+
             self.end_headers()
             self.safe_write(data)
+
         except (BrokenPipeError, ConnectionResetError, socket.timeout):
             pass
 
@@ -853,52 +951,68 @@ class Handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
 
         if path in ["/", "/index.html"]:
-            data = render_html().encode("utf-8")
+            html_doc = render_html()
+            data = html_doc.encode("utf-8")
             self.safe_send_bytes(200, data, "text/html; charset=utf-8")
             return
 
-        if path == "/images":
-            data = json.dumps(build_slide_sequence(force_refresh=True)).encode("utf-8")
-            self.safe_send_bytes(200, data, "application/json; charset=utf-8", {"Cache-Control": "no-store"})
+        if path in ["/images", "/images.json"]:
+            sequence = build_slide_sequence(force_refresh=True)
+            data = json.dumps(sequence).encode("utf-8")
+            self.safe_send_bytes(
+                200,
+                data,
+                "application/json; charset=utf-8",
+                {"Cache-Control": "no-store"},
+            )
             return
 
         if path == "/proxy":
             url = query.get("url", [""])[0]
-            strict_scene = query.get("strict", ["1"])[0] != "0"
+
             if not url:
                 self.safe_send_bytes(400, b"Missing image URL")
                 return
 
-            if url_has_fragment(url, KNOWN_BAD_URL_FRAGMENTS):
+            if url_is_known_bad(url):
                 REJECT_CACHE[url] = {"time": time.time()}
                 print("[REJECT known bad]", url)
                 self.safe_send_bytes(415, b"Known bad BBC graphic", extra_headers={"Cache-Control": "no-store"})
                 return
 
             cleanup_proxy_cache()
-            cache_key = url + "|strict=" + ("1" if strict_scene else "0")
-            cached = PROXY_CACHE.get(cache_key)
+            cached = PROXY_CACHE.get(url)
             if cached and time.time() - cached["time"] < PROXY_CACHE_SECONDS:
-                self.safe_send_bytes(200, cached["data"], cached["content_type"], {"Cache-Control": "public, max-age=300"})
+                self.safe_send_bytes(
+                    200,
+                    cached["data"],
+                    cached["content_type"],
+                    {"Cache-Control": "public, max-age=300"},
+                )
                 return
 
             try:
                 data, content_type = fetch_bytes(url, timeout=8)
+
                 if not content_type.startswith("image/"):
                     REJECT_CACHE[url] = {"time": time.time()}
                     self.safe_send_bytes(415, b"Not an image", extra_headers={"Cache-Control": "no-store"})
                     return
 
                 test_data = data
+                vertical_only = url_is_vertical_only(url)
+
                 try:
                     arr = np.frombuffer(data, np.uint8)
                     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
                     if img is not None:
                         if image_is_probably_full_graphic_page(data):
                             REJECT_CACHE[url] = {"time": time.time()}
                             print("[REJECT graphic pre-crop]", url)
                             self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                             return
+
                         cropped, did_crop = crop_top_if_needed(img, url)
                         if cropped is not None and cropped.size > 0:
                             ok, encoded = cv2.imencode(".jpg", cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 96])
@@ -907,7 +1021,8 @@ class Handler(BaseHTTPRequestHandler):
                                 test_data = data
                                 content_type = "image/jpeg"
                                 if did_crop:
-                                    print("[CROP top/logo]", url)
+                                    print("[CROP top]", url)
+
                 except Exception:
                     test_data = data
 
@@ -923,21 +1038,25 @@ class Handler(BaseHTTPRequestHandler):
                     self.safe_send_bytes(415, b"Rejected center divider", extra_headers={"Cache-Control": "no-store"})
                     return
 
-                # Scene rules are applied only in strict mode. Vertical-only URLs are allowed
-                # through the proxy, but the browser skips them on desktop/horizontal screens.
-                if strict_scene and not url_is_vertical_only(url):
-                    if image_is_close_subject_not_scene(test_data):
-                        print("[REJECT close subject strict]", url)
-                        self.safe_send_bytes(415, b"Rejected close subject", extra_headers={"Cache-Control": "no-store"})
-                        return
-                    if image_is_overcropped_subject(test_data):
-                        print("[REJECT overcropped strict]", url)
-                        self.safe_send_bytes(415, b"Rejected overcropped subject", extra_headers={"Cache-Control": "no-store"})
-                        return
+                if (not vertical_only) and image_is_overcropped_subject(test_data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT overcropped]", url)
+                    self.safe_send_bytes(415, b"Rejected overcropped subject", extra_headers={"Cache-Control": "no-store"})
+                    return
 
                 print("[SERVE]", url)
-                PROXY_CACHE[cache_key] = {"time": time.time(), "data": data, "content_type": content_type}
-                self.safe_send_bytes(200, data, content_type, {"Cache-Control": "public, max-age=300"})
+                PROXY_CACHE[url] = {
+                    "time": time.time(),
+                    "data": data,
+                    "content_type": content_type,
+                }
+
+                self.safe_send_bytes(
+                    200,
+                    data,
+                    content_type,
+                    {"Cache-Control": "public, max-age=300"},
+                )
                 return
 
             except Exception as e:
@@ -952,10 +1071,14 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print()
     print("misshurry")
-    print("Serving at http://localhost:%s" % PORT)
-    print("Auto-advance: every 5 seconds")
+    print("Higher-res BBC URLs: ON")
+    print("Graphic rejection: ON")
+    print("BBC logos: crop top")
+    print("VOICE logo special crop: ON")
+    print("Vertical-only URL fragments: ON")
+    print("Timer-only slideshow: every 5 seconds")
     print("Click-to-change: OFF")
-    print("Touch flashlight movement: ON")
-    print("Vertical-only images: phone portrait only")
+    print("Bottom URL copy link: ON")
+    print(f"Serving at http://localhost:{PORT}")
     print()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
