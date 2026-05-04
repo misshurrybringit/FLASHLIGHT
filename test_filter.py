@@ -1,99 +1,87 @@
 """
-Regression test for the BBC branding filter in server.py.
-
+Regression checks for the BBC flashlight server rules.
 Run with:
-    ./venv/bin/python3 test_filter.py
+    python3 test.py
 
-Each bad_sample_* file is a real BBC-served image that slipped through the filter
-at some point. This script confirms they are all still caught after any changes.
-raw_bbc_sample.jpg is a confirmed GOOD news photo — it must never be rejected.
-
-When you add a new rule to image_has_bbc_branding(), add the new bad sample here
-and re-run to make sure everything still passes.
+This does not download images. It checks the URL-fragment rules that decide
+whether images are hard-blocked or only allowed on vertical phones.
 """
 
-import sys
-import cv2
-import numpy as np
-from server import image_has_bbc_branding, image_is_probably_full_graphic_page
+from server import (
+    KNOWN_BAD_URL_FRAGMENTS,
+    VERTICAL_ONLY_URL_FRAGMENTS,
+    url_is_known_bad,
+    url_is_vertical_only,
+    url_needs_voice_crop,
+)
 
-# (filename, should_be_rejected, description, source_url)
-SAMPLES = [
+TESTS = [
     (
-        "bad_sample_1.jpg", True,
-        "BBC INDEPTH graphic — mushroom collage with BBC logo",
-        "https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/1863/live/2b37c9a0-da84-11f0-b67b-690eb873de1b.jpg",
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/dce9/live/166137e0-3f11-11f1-bd52-e755d604ece4.jpg",
+        False,
+        True,
+        False,
+        "vertical/cropped image should be vertical-phone only, not hard blocked",
     ),
     (
-        "bad_sample_2.jpg", True,
-        "BBC VERIFY — war/conflict photo with branding overlay",
-        "https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/db29/live/5c328660-2f45-11f1-934f-036468834728.jpg",
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/627b/live/3600d2f0-2214-11f1-b297-95b0a0a8331e.jpg",
+        False,
+        True,
+        False,
+        "cropped full-body/vertical image should be vertical-phone only, not hard blocked",
     ),
     (
-        "bad_sample_3.jpg", False,
-        "UNCONFIRMED — two people side by side, no visible BBC logo (may not need filtering)",
-        "https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/ba3a/live/4954dd00-3791-11f1-879d-1b2f5c3919b8.jpg",
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/4448/live/f16b6b80-43d5-11f1-bf3e-3d07e81b01ce.jpg",
+        False,
+        False,
+        True,
+        "VOICE-logo image should be cropped, not rejected",
     ),
     (
-        "bad_sample_4.png", True,
-        "BBC VERIFY — map/geography graphic with BBC logo",
-        "https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/8b21/live/5f2f50e0-3351-11f1-8606-05fe34b06e1b.png",
-    ),
-    (
-        "bad_sample_5.jpg", True,
-        "NEWSCAST",
-        "https://ichef.bbci.co.uk/images/ic/1008x567/p0l7jnbt.jpg",
-    ),
-    (
-        "bbc.png", True,
-        "BBC orb/glow — near-black frame with warm glowing circle",
-        "(saved from browser — no original URL)",
-    ),
-    (
-        "raw_bbc_sample.jpg", False,
-        "GOOD PHOTO — should never be rejected (person at red carpet event)",
-        "https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/1a44/live/717b0680-3816-11f1-9d5c-8ba507d7dbde.jpg",
+        "https://ichef.bbci.co.uk/images/ic/1024x576/p0ngd4cc.jpg",
+        True,
+        False,
+        False,
+        "known bad cropped/isolated image should be hard blocked",
     ),
 ]
 
 
-def check(path):
-    with open(path, "rb") as f:
-        data = f.read()
-    return image_has_bbc_branding(data) or image_is_probably_full_graphic_page(data)
+def main():
+    failures = 0
+    print()
+    for url, expected_bad, expected_vertical, expected_voice_crop, label in TESTS:
+        got_bad = url_is_known_bad(url)
+        got_vertical = url_is_vertical_only(url)
+        got_voice_crop = url_needs_voice_crop(url)
 
+        ok = (
+            got_bad == expected_bad
+            and got_vertical == expected_vertical
+            and got_voice_crop == expected_voice_crop
+        )
 
-passed = 0
-failed = 0
+        status = "PASS ✓" if ok else "FAIL ✗"
+        print(f"  {status} {label}")
+        if not ok:
+            print(f"        url: {url}")
+            print(f"        known_bad: expected {expected_bad}, got {got_bad}")
+            print(f"        vertical_only: expected {expected_vertical}, got {got_vertical}")
+            print(f"        voice_crop: expected {expected_voice_crop}, got {got_voice_crop}")
+            failures += 1
 
-print()
-for filename, should_reject, description, url in SAMPLES:
-    try:
-        rejected = check(filename)
-    except Exception as e:
-        print(f"  ERROR  {filename}: {e}")
-        failed += 1
-        continue
-
-    if should_reject is None:
-        # Unconfirmed — just report, don't fail
-        status = "REJECTED" if rejected else "passes"
-        print(f"  ?      {filename} [{status}] — {description}")
-        continue
-
-    ok = rejected == should_reject
-    if ok:
-        label = "REJECT ✓" if should_reject else "PASS   ✓"
-        print(f"  {label}  {filename} — {description}")
-        passed += 1
+    overlap = set(KNOWN_BAD_URL_FRAGMENTS) & set(VERTICAL_ONLY_URL_FRAGMENTS)
+    if overlap:
+        print(f"  FAIL ✗ fragments cannot be both hard-bad and vertical-only: {sorted(overlap)}")
+        failures += 1
     else:
-        label = "MISSED ✗" if should_reject else "FALSE+ ✗"
-        print(f"  {label}  {filename} — {description}")
-        print(f"           {url}")
-        failed += 1
+        print("  PASS ✓ no overlap between hard-bad and vertical-only fragments")
 
-print()
-print(f"  {passed} passed, {failed} failed")
-print()
+    print()
+    print(f"  {len(TESTS) + 1 - failures} passed, {failures} failed")
+    print()
+    raise SystemExit(1 if failures else 0)
 
-sys.exit(1 if failed > 0 else 0)
+
+if __name__ == "__main__":
+    main()
