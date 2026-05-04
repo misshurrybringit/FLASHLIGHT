@@ -116,6 +116,56 @@ TESTS = [
         False,
         "close-up face / isolated portrait should be hard blocked",
     ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/79d6/live/7b23ccb0-328c-11f1-b297-95b0a0a8331e.jpg",
+        False,
+        True,
+        False,
+        "vertical composition inside landscape frame should be vertical-phone only",
+    ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/2466/live/843ef730-4690-11f1-b55d-0f258dce1735.jpg",
+        False,
+        True,
+        False,
+        "vertical/cropped image should be vertical-phone only",
+    ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/32d0/live/7488a0b0-4303-11f1-8f44-65d2172cbb44.jpg",
+        True,
+        False,
+        False,
+        "generic cropped portrait should be hard blocked",
+    ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/23b1/live/acb55400-38a5-11f1-a963-91d9e730d487.jpg",
+        True,
+        False,
+        False,
+        "generic close-up portrait should be hard blocked",
+    ),
+
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/79f2/live/4c3e0ce0-3a47-11f1-8606-05fe34b06e1b.jpg",
+        True,
+        False,
+        False,
+        "graphic + cropped editorial image should be hard blocked",
+    ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/55ee/live/72e83b70-43e5-11f1-9113-1988573e8ff7.jpg",
+        True,
+        False,
+        False,
+        "generic isolated subject / non-scene image should be hard blocked",
+    ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/6245/live/c022fa90-44a0-11f1-ac78-2112837ce2aa.jpg",
+        False,
+        True,
+        False,
+        "vertical composition inside landscape frame should be vertical-phone only",
+    ),
 
 ]
 
