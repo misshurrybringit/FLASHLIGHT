@@ -64,6 +64,7 @@ VERTICAL_ONLY_URL_FRAGMENTS = [
     "166137e0",
     "3600d2f0",
     "9a3df7e0",
+    "b1e9ef60",
 ]
 
 # Images with a small VOICE logo that should be cropped, not rejected.
@@ -461,13 +462,23 @@ canvas {{
   bottom: 8px;
   left: 50%;
   transform: translateX(-50%);
-  color: rgba(255,255,255,0.42);
+  color: rgba(255,255,255,0.52);
   font: 11px monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 90vw;
-  z-index: 10;
+  z-index: 50;
+  cursor: copy;
+  user-select: none;
+  pointer-events: auto;
+  background: rgba(0,0,0,0.28);
+  padding: 3px 6px;
+  border-radius: 4px;
+}}
+
+canvas {{
+  touch-action: none;
 }}
 </style>
 </head>
@@ -492,6 +503,7 @@ let mouseY = 0;
 let preloadedImages = new Map();
 let shuffledPool = [];
 let poolIndex = 0;
+let isLoadingSlide = false;
 
 let DPR = 1;
 let VIEW_W = window.innerWidth;
@@ -612,23 +624,20 @@ function makeImage(sourceImage) {{
   return off;
 }}
 
-function drawFallbackMessage(text) {{
+function drawFallbackMessage() {{
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "rgba(255,255,255,0.82)";
-  ctx.font = `${{Math.round(14 * DPR)}}px Arial, Helvetica, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 }}
 
 function drawFlashlight() {{
   if (!currentPrepared) {{
-    drawFallbackMessage("loading image");
+    drawFallbackMessage();
     return;
   }}
 
-  const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * 0.10;
+  const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+  const radius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) * (isTouchDevice ? 0.13 : 0.075);
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#000";
@@ -700,25 +709,29 @@ function prepareAndDraw(img, src) {{
   const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
   const el = document.getElementById("debug-url");
   el.textContent = rawUrl;
+  el.title = "Click to copy image URL";
+  el.dataset.url = rawUrl;
 }}
 
 function loadRandomSlide(attempts = 0) {{
+  if (isLoadingSlide) return;
+  isLoadingSlide = true;
   resizeCanvas();
 
   if (!slides.length) {{
-    drawFallbackMessage("no images found");
+    isLoadingSlide = false;
     return;
   }}
 
-  if (attempts > 40) {{
-    drawFallbackMessage("too many rejected images - refresh");
+  if (attempts > 50) {{
+    isLoadingSlide = false;
     return;
   }}
 
   const src = getNextRandomSrc();
 
   if (!src) {{
-    drawFallbackMessage("no image");
+    isLoadingSlide = false;
     return;
   }}
 
@@ -726,6 +739,7 @@ function loadRandomSlide(attempts = 0) {{
     const img = preloadedImages.get(src);
     preloadedImages.delete(src);
     prepareAndDraw(img, src);
+    isLoadingSlide = false;
     return;
   }}
 
@@ -734,26 +748,45 @@ function loadRandomSlide(attempts = 0) {{
 
   loader.onload = () => {{
     prepareAndDraw(loader, src);
+    isLoadingSlide = false;
   }};
 
   loader.onerror = () => {{
     slides = slides.filter(s => s.src !== src);
     shuffledPool = shuffledPool.filter(s => s !== src);
-    loadRandomSlide(attempts + 1);
+    isLoadingSlide = false;
+    setTimeout(() => loadRandomSlide(attempts + 1), 80);
   }};
 
   loader.src = src;
 }}
 
-canvas.addEventListener("mousemove", (e) => {{
+function updateFlashlightPositionFromPointer(e) {{
   const rect = canvas.getBoundingClientRect();
+  const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+  const offsetY = isTouchDevice ? window.innerHeight * 0.12 : 0;
   mouseX = (e.clientX - rect.left) * DPR;
-  mouseY = (e.clientY - rect.top) * DPR;
+  mouseY = ((e.clientY - rect.top) - offsetY) * DPR;
   drawFlashlight();
+}}
+
+canvas.addEventListener("pointermove", (e) => {{
+  updateFlashlightPositionFromPointer(e);
 }});
 
-canvas.addEventListener("click", () => {{
-  loadRandomSlide();
+const debugUrlEl = document.getElementById("debug-url");
+debugUrlEl.addEventListener("click", async (e) => {{
+  e.stopPropagation();
+  const url = debugUrlEl.dataset.url || debugUrlEl.textContent;
+  if (!url) return;
+  try {{
+    await navigator.clipboard.writeText(url);
+    const oldText = debugUrlEl.textContent;
+    debugUrlEl.textContent = "copied";
+    setTimeout(() => {{ debugUrlEl.textContent = oldText; }}, 650);
+  }} catch (err) {{
+    window.prompt("Copy image URL:", url);
+  }}
 }});
 
 window.addEventListener("resize", () => {{
@@ -772,6 +805,9 @@ mouseX = canvas.width / 2;
 mouseY = canvas.height / 2;
 refillPool();
 loadRandomSlide();
+setInterval(() => {{
+  loadRandomSlide();
+}}, 5000);
 </script>
 </body>
 </html>
