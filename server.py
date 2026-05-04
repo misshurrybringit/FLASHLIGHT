@@ -177,6 +177,43 @@ def extract_rss_item_image(item):
     return None
 
 
+
+def extract_image_from_html_page(url):
+    """Fallback for non-BBC feeds whose RSS items do not expose image URLs.
+    Opens the article page and extracts og:image / twitter:image metadata.
+    """
+    try:
+        html = fetch_text(url, timeout=4)
+
+        patterns = [
+            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+            r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
+        ]
+
+        for pattern in patterns:
+            m = re.search(pattern, html, re.IGNORECASE)
+            if m:
+                img = m.group(1).strip()
+                img = img.replace("&amp;", "&")
+                if img.startswith("//"):
+                    img = "https:" + img
+                elif img.startswith("/"):
+                    parsed = urllib.parse.urlparse(url)
+                    img = f"{parsed.scheme}://{parsed.netloc}{img}"
+
+                lower = img.lower()
+                if "logo" in lower or "branding" in lower or "placeholder" in lower:
+                    continue
+
+                return upgrade_bbc_image_url(img)
+
+    except Exception:
+        pass
+
+    return None
+
 def get_bbc_images(limit=MAX_IMAGE_POOL):
     now = time.time()
 
@@ -202,7 +239,19 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                     break
 
                 img = extract_rss_item_image(item)
+
+                # Fallback for Reuters/AP style feeds: their RSS items often do not
+                # include image tags, but the article page usually has og:image.
                 if not img:
+                    link = item.find("link")
+                    if link is not None and link.text:
+                        img = extract_image_from_html_page(link.text.strip())
+
+                if not img:
+                    continue
+
+                lower_img = img.lower()
+                if "logo" in lower_img or "branding" in lower_img or "placeholder" in lower_img:
                     continue
 
                 if url_is_known_bad(img):
