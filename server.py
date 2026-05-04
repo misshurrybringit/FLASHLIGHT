@@ -75,6 +75,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "f4ee5fc0",
     "cfcd74b0",
     "c471ab80",
+    "acb55400",
+    "7488a0b0",
 ]
 
 # These are not good on desktop/landscape, but may be usable on vertical phone.
@@ -82,6 +84,8 @@ VERTICAL_ONLY_URL_FRAGMENTS = [
     "166137e0",
     "9a3df7e0",
     "b1e9ef60",
+    "843ef730",
+    "7b23ccb0",
 ]
 
 # Images with a small VOICE logo that should be cropped, not rejected.
@@ -118,6 +122,20 @@ def upgrade_bbc_image_url(url):
     return url
 
 
+def clean_extracted_image_url(url):
+    if not url:
+        return None
+    url = urllib.parse.unquote(str(url).strip())
+    if url.startswith("//"):
+        url = "https:" + url
+    if not url.startswith("http"):
+        return None
+    lowered = url.lower()
+    if any(word in lowered for word in ["logo", "icon", "sprite", "placeholder", "avatar"]):
+        return None
+    return upgrade_bbc_image_url(url)
+
+
 def fetch_text(url, timeout=4):
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=timeout) as response:
@@ -152,67 +170,50 @@ def extract_rss_item_image(item):
 
     thumb = item.find("media:thumbnail", media_ns)
     if thumb is not None:
-        return upgrade_bbc_image_url(thumb.attrib.get("url"))
+        return clean_extracted_image_url(thumb.attrib.get("url"))
 
     for media_content in item.findall("media:content", media_ns):
         url = media_content.attrib.get("url")
         mime = media_content.attrib.get("type", "")
         medium = media_content.attrib.get("medium", "")
         if url and (mime.startswith("image/") or medium == "image"):
-            return upgrade_bbc_image_url(url)
+            return clean_extracted_image_url(url)
 
     enclosure = item.find("enclosure")
     if enclosure is not None:
         url = enclosure.attrib.get("url", "")
         mime = enclosure.attrib.get("type", "")
         if url and mime.startswith("image/"):
-            return upgrade_bbc_image_url(url)
+            return clean_extracted_image_url(url)
 
     description = item.find("description")
     if description is not None and description.text:
         m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', description.text, re.IGNORECASE)
         if m:
-            return upgrade_bbc_image_url(m.group(1))
+            return clean_extracted_image_url(m.group(1))
 
     return None
 
 
-
 def extract_image_from_html_page(url):
-    """Fallback for non-BBC feeds whose RSS items do not expose image URLs.
-    Opens the article page and extracts og:image / twitter:image metadata.
-    """
     try:
         html = fetch_text(url, timeout=4)
-
         patterns = [
             r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
             r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
             r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
             r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
         ]
-
         for pattern in patterns:
             m = re.search(pattern, html, re.IGNORECASE)
             if m:
-                img = m.group(1).strip()
-                img = img.replace("&amp;", "&")
-                if img.startswith("//"):
-                    img = "https:" + img
-                elif img.startswith("/"):
-                    parsed = urllib.parse.urlparse(url)
-                    img = f"{parsed.scheme}://{parsed.netloc}{img}"
-
-                lower = img.lower()
-                if "logo" in lower or "branding" in lower or "placeholder" in lower:
-                    continue
-
-                return upgrade_bbc_image_url(img)
-
+                cleaned = clean_extracted_image_url(m.group(1))
+                if cleaned:
+                    return cleaned
     except Exception:
         pass
-
     return None
+
 
 def get_bbc_images(limit=MAX_IMAGE_POOL):
     now = time.time()
@@ -240,18 +241,14 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
                 img = extract_rss_item_image(item)
 
-                # Fallback for Reuters/AP style feeds: their RSS items often do not
-                # include image tags, but the article page usually has og:image.
+                # Reuters/AP and some non-BBC feeds often omit RSS image tags.
+                # Fall back to the article page's og:image/twitter:image.
                 if not img:
                     link = item.find("link")
                     if link is not None and link.text:
-                        img = extract_image_from_html_page(link.text.strip())
+                        img = extract_image_from_html_page(link.text)
 
                 if not img:
-                    continue
-
-                lower_img = img.lower()
-                if "logo" in lower_img or "branding" in lower_img or "placeholder" in lower_img:
                     continue
 
                 if url_is_known_bad(img):
@@ -402,15 +399,23 @@ def top_has_bbc_branding(img):
         return False
 
 
-def crop_top_if_needed(img):
+def crop_top_if_needed(img, url=""):
     if img is None or img.size == 0:
         return img, False
 
     try:
+        h, w = img.shape[:2]
+
+        if url_needs_voice_crop(url):
+            crop_y = int(h * 0.11)
+            cropped = img[crop_y:, :]
+            if cropped is not None and cropped.size > 0:
+                return cropped, True
+            return img, False
+
         if not top_has_bbc_branding(img):
             return img, False
 
-        h, w = img.shape[:2]
         crop_y = int(h * 0.18)
         cropped = img[crop_y:, :]
 
@@ -514,7 +519,7 @@ def render_html():
 <html>
 <head>
 <meta charset="utf-8">
-<title>BBC Flashlight</title>
+<title>misshurry</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
 html, body {{
@@ -997,7 +1002,7 @@ class Handler(BaseHTTPRequestHandler):
                             self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                             return
 
-                        cropped, did_crop = crop_top_if_needed(img)
+                        cropped, did_crop = crop_top_if_needed(img, url)
 
                         if cropped is not None and cropped.size > 0:
                             ok, encoded = cv2.imencode(".jpg", cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
@@ -1052,7 +1057,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print()
-    print("BBC Flashlight")
+    print("misshurry")
     print("Higher-res BBC URLs: ON")
     print("Graphic rejection: ON")
     print("BBC logos: crop top")
