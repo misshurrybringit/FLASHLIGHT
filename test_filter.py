@@ -25,10 +25,10 @@ TESTS = [
     ),
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/627b/live/3600d2f0-2214-11f1-b297-95b0a0a8331e.jpg",
-        False,
         True,
         False,
-        "cropped full-body/vertical image should be vertical-phone only, not hard blocked",
+        False,
+        "bad bottom-cropped vertical/editorial image should be hard blocked",
     ),
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/1e87/live/9a3df7e0-4562-11f1-b55d-0f258dce1735.jpg",
@@ -37,6 +37,14 @@ TESTS = [
         False,
         "vertical/cropped editorial image should be vertical-phone only, not hard blocked",
     ),
+
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/5ccf/live/b1e9ef60-44af-11f1-bd52-e755d604ece4.jpg",
+        False,
+        True,
+        False,
+        "vertical/cropped image should be vertical-phone only, not hard blocked",
+    ),
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/d379/live/9f35a8f0-4545-11f1-8ea3-630273c214ab.jpg",
         True,
@@ -44,6 +52,14 @@ TESTS = [
         False,
         "promotional / graphic editorial image should be hard blocked",
     ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/2078/live/b9785300-4565-11f1-b55d-0f258dce1735.png",
+        True,
+        False,
+        False,
+        "black center-divider graphic image should be hard blocked",
+    ),
+
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/4448/live/f16b6b80-43d5-11f1-bf3e-3d07e81b01ce.jpg",
         False,
@@ -79,6 +95,28 @@ TESTS = [
         False,
         "generic editorial portrait / isolated subject should be hard blocked",
     ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/5938/live/c471ab80-44b1-11f1-b55d-0f258dce1735.png",
+        True,
+        False,
+        False,
+        "VOICE branded PNG / promo graphic should be hard blocked",
+    ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/ef15/live/cfcd74b0-3f2e-11f1-ac78-2112837ce2aa.jpg",
+        True,
+        False,
+        False,
+        "promotional/editorial portrait should be hard blocked",
+    ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/86b0/live/f4ee5fc0-3ffb-11f1-a269-2b0eab1d0b0e.jpg",
+        True,
+        False,
+        False,
+        "close-up face / isolated portrait should be hard blocked",
+    ),
+
 ]
 
 
