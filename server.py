@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import re
 import socket
@@ -11,9 +12,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import cv2
 import numpy as np
 
-PORT = 8000
+PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
+    # BBC general + regional feeds
     "https://feeds.bbci.co.uk/news/rss.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
@@ -22,22 +24,33 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
     "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
     "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
+    "https://feeds.bbci.co.uk/news/uk/rss.xml",
+
+    # Extra BBC feeds to compensate for stricter filtering
+    "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "https://feeds.bbci.co.uk/news/technology/rss.xml",
     "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
     "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
-    "https://feeds.bbci.co.uk/news/uk/rss.xml",
+    "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
+    "https://feeds.bbci.co.uk/news/health/rss.xml",
+
+    # Additional RSS sources. If a source does not expose images, it is simply skipped.
+    "https://feeds.reuters.com/reuters/worldNews",
+    "https://feeds.reuters.com/reuters/topNews",
+    "https://feeds.apnews.com/rss/apf-topnews",
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-MAX_IMAGE_POOL = 240
-SEQUENCE_LENGTH = 200
+MAX_IMAGE_POOL = 650
+SEQUENCE_LENGTH = 500
 
 IMAGE_CACHE = {"time": 0, "images": []}
 CACHE_SECONDS = 120
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 160
+PROXY_CACHE_MAX_ITEMS = 260
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -48,21 +61,25 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "p0kxxp17",
     "p0n9y769",
     "3a08bc10",
+    "b9785300",
 
     # Cropped / isolated / generic portrait-like images that do not read as scenes
     "c5a74450",
     "f53b6250",
     "p0ngd4cc",
+    "3600d2f0",
     "00a03cc0",
     "929fd780",
     "06449360",
     "9f35a8f0",
+    "f4ee5fc0",
+    "cfcd74b0",
+    "c471ab80",
 ]
 
 # These are not good on desktop/landscape, but may be usable on vertical phone.
 VERTICAL_ONLY_URL_FRAGMENTS = [
     "166137e0",
-    "3600d2f0",
     "9a3df7e0",
     "b1e9ef60",
 ]
@@ -180,7 +197,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             items = root.findall(".//item")
             random.shuffle(items)
 
-            for item in items[:200]:
+            for item in items[:600]:
                 if len(images) >= limit:
                     break
 
@@ -345,7 +362,7 @@ def crop_top_if_needed(img):
             return img, False
 
         h, w = img.shape[:2]
-        crop_y = int(h * 0.34)
+        crop_y = int(h * 0.18)
         cropped = img[crop_y:, :]
 
         if cropped is None or cropped.size == 0:
@@ -380,27 +397,33 @@ def image_has_center_divider(data):
     h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # Detect thin bright/white vertical graphic seams that run nearly top-to-bottom.
-    # This catches BBC graphic cards with white dividing lines without rejecting most
-    # normal photos that only have local edges, poles, door frames, etc.
+    # Detect thin bright/white OR dark/black vertical graphic seams that run
+    # nearly top-to-bottom. This catches BBC graphic cards with dividing lines
+    # without rejecting most normal photos that only have local edges, poles, etc.
     bright = gray > 218
+    dark = gray < 38
     center_min = int(w * 0.18)
     center_max = int(w * 0.82)
 
     for x in range(center_min, center_max):
-        band = bright[:, max(0, x - 1):min(w, x + 2)]
-        bright_by_row = np.mean(band, axis=1) > 0.45
-        full_height_frac = float(np.mean(bright_by_row))
+        bright_band = bright[:, max(0, x - 1):min(w, x + 2)]
+        dark_band = dark[:, max(0, x - 1):min(w, x + 2)]
 
-        if full_height_frac > 0.58:
-            return True
+        bright_by_row = np.mean(bright_band, axis=1) > 0.45
+        dark_by_row = np.mean(dark_band, axis=1) > 0.45
 
-        # Also catch dashed-looking vertical white lines with small gaps.
-        if full_height_frac > 0.42:
-            transitions = np.diff(bright_by_row.astype(np.int8))
-            segment_count = int(np.sum(transitions == 1))
-            if segment_count <= 8:
+        for line_by_row in (bright_by_row, dark_by_row):
+            full_height_frac = float(np.mean(line_by_row))
+
+            if full_height_frac > 0.58:
                 return True
+
+            # Also catch dashed-looking vertical lines with small gaps.
+            if full_height_frac > 0.42:
+                transitions = np.diff(line_by_row.astype(np.int8))
+                segment_count = int(np.sum(transitions == 1))
+                if segment_count <= 8:
+                    return True
 
     grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     edge_strength = np.abs(grad_x)
@@ -430,7 +453,11 @@ def render_html():
     sequence = []
     for img in images:
         proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
-        sequence.append({"src": proxied})
+        sequence.append({
+            "src": proxied,
+            "raw": img,
+            "verticalOnly": url_is_vertical_only(img),
+        })
 
     sequence_json = json.dumps(sequence)
 
@@ -555,8 +582,20 @@ function shuffleArray(arr) {{
   return a;
 }}
 
+function isVerticalPhone() {{
+  const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+  return isTouchDevice && window.innerHeight > window.innerWidth;
+}}
+
+function slideAllowedForCurrentOrientation(slide) {{
+  // verticalOnly images are allowed only when the device is a vertical phone.
+  // They are blocked on desktop and horizontal/landscape views.
+  if (slide.verticalOnly && !isVerticalPhone()) return false;
+  return true;
+}}
+
 function refillPool() {{
-  let candidates = slides.map(s => s.src);
+  let candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
 
   if (currentSrc && candidates.length > 1) {{
     candidates = candidates.filter(src => src !== currentSrc);
@@ -747,6 +786,16 @@ function loadRandomSlide(attempts = 0) {{
   loader.decoding = "async";
 
   loader.onload = () => {{
+    // Extra desktop guard: block true portrait/tall files outside vertical phone mode.
+    // Some BBC URLs are landscape frames with vertical-looking art, handled by verticalOnly metadata above.
+    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{
+      slides = slides.filter(s => s.src !== src);
+      shuffledPool = shuffledPool.filter(s => s !== src);
+      isLoadingSlide = false;
+      setTimeout(() => loadRandomSlide(attempts + 1), 80);
+      return;
+    }}
+
     prepareAndDraw(loader, src);
     isLoadingSlide = false;
   }};
@@ -791,6 +840,7 @@ debugUrlEl.addEventListener("click", async (e) => {{
 
 window.addEventListener("resize", () => {{
   resizeCanvas();
+  refillPool();
 
   if (currentImage) {{
     currentPrepared = makeImage(currentImage);
