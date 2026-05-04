@@ -38,19 +38,43 @@ RSS_FEEDS = [
     "https://feeds.reuters.com/reuters/worldNews",
     "https://feeds.reuters.com/reuters/topNews",
     "https://feeds.apnews.com/rss/apf-topnews",
+
+    # More non-BBC feeds that tend to expose images in RSS/metadata.
+    "https://feeds.npr.org/1001/rss.xml",
+    "https://feeds.npr.org/1004/rss.xml",
+    "https://www.theguardian.com/world/rss",
+    "https://www.theguardian.com/us-news/rss",
+    "https://www.theguardian.com/international/rss",
+    "http://rss.cnn.com/rss/edition.rss",
+    "http://rss.cnn.com/rss/edition_world.rss",
+    "http://rss.cnn.com/rss/edition_us.rss",
+]
+
+# HTML section pages are used as a fallback because Reuters/AP often do not expose
+# usable image URLs in public RSS. These pages are scanned for large news photos
+# and article OpenGraph images.
+PAGE_SOURCES = [
+    "https://www.reuters.com/world/",
+    "https://www.reuters.com/pictures/",
+    "https://www.reuters.com/business/",
+    "https://apnews.com/",
+    "https://apnews.com/world-news",
+    "https://apnews.com/us-news",
+    "https://www.theguardian.com/world",
+    "https://www.cnn.com/world",
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-MAX_IMAGE_POOL = 650
-SEQUENCE_LENGTH = 500
+MAX_IMAGE_POOL = 1100
+SEQUENCE_LENGTH = 850
 
 IMAGE_CACHE = {"time": 0, "images": []}
-CACHE_SECONDS = 120
+CACHE_SECONDS = 75
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 260
+PROXY_CACHE_MAX_ITEMS = 420
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -77,6 +101,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "c471ab80",
     "acb55400",
     "7488a0b0",
+    "4c3e0ce0",
+    "72e83b70",
 ]
 
 # These are not good on desktop/landscape, but may be usable on vertical phone.
@@ -86,6 +112,7 @@ VERTICAL_ONLY_URL_FRAGMENTS = [
     "b1e9ef60",
     "843ef730",
     "7b23ccb0",
+    "c022fa90",
 ]
 
 # Images with a small VOICE logo that should be cropped, not rejected.
@@ -215,6 +242,127 @@ def extract_image_from_html_page(url):
     return None
 
 
+
+def normalize_link(href, base_url):
+    if not href:
+        return None
+    href = href.strip()
+    if href.startswith("//"):
+        href = "https:" + href
+    if href.startswith("/"):
+        parsed = urllib.parse.urlparse(base_url)
+        href = f"{parsed.scheme}://{parsed.netloc}{href}"
+    if not href.startswith("http"):
+        return None
+    return href.split("#")[0]
+
+
+def source_domains_match(url, base_url):
+    try:
+        u = urllib.parse.urlparse(url).netloc.replace("www.", "")
+        b = urllib.parse.urlparse(base_url).netloc.replace("www.", "")
+        return bool(u and b and (u == b or u.endswith("." + b) or b.endswith("." + u)))
+    except Exception:
+        return False
+
+
+def extract_article_links_from_html(html, base_url, max_links=36):
+    links = []
+    seen = set()
+
+    for href in re.findall(r'<a[^>]+href=["\']([^"\']+)["\']', html, re.IGNORECASE):
+        link = normalize_link(href, base_url)
+        if not link or link in seen:
+            continue
+
+        lowered = link.lower()
+        if any(skip in lowered for skip in ["/video", "/live", "/audio", "/newsletter", "/login", "signin", "subscribe"]):
+            continue
+
+        if not source_domains_match(link, base_url):
+            continue
+
+        # Avoid front pages/category pages when possible; prefer article-looking links.
+        path = urllib.parse.urlparse(link).path.strip("/")
+        if not path or path in ["world", "pictures", "business", "us-news", "world-news"]:
+            continue
+
+        seen.add(link)
+        links.append(link)
+        if len(links) >= max_links:
+            break
+
+    return links
+
+
+def extract_direct_images_from_html(html):
+    candidates = []
+    patterns = [
+        r'https?://[^"\'<> ]+(?:reuters|arcpublishing|apnews|ap\.org|guim|cnn)[^"\'<> ]+?\.(?:jpg|jpeg|png|webp)(?:\?[^"\'<> ]*)?',
+        r'<img[^>]+src=["\']([^"\']+)["\']',
+        r'<source[^>]+srcset=["\']([^"\']+)["\']',
+    ]
+
+    for pattern in patterns:
+        for match in re.findall(pattern, html, re.IGNORECASE):
+            # srcset may contain several URLs with width descriptors; take each URL.
+            pieces = str(match).split(",")
+            for piece in pieces:
+                url = piece.strip().split(" ")[0]
+                cleaned = clean_extracted_image_url(url)
+                if cleaned:
+                    candidates.append(cleaned)
+
+    # Keep only likely large editorial images, not tiny thumbnails/icons.
+    filtered = []
+    seen = set()
+    for img in candidates:
+        lowered = img.lower()
+        if any(bad in lowered for bad in ["logo", "sprite", "icon", "placeholder", "avatar", "badge"]):
+            continue
+        if img in seen:
+            continue
+        seen.add(img)
+        filtered.append(img)
+    return filtered
+
+
+def get_page_source_images(limit=260):
+    images = []
+    seen = set()
+    pages = PAGE_SOURCES[:]
+    random.shuffle(pages)
+
+    for page_url in pages:
+        if len(images) >= limit:
+            break
+
+        try:
+            html = fetch_text(page_url, timeout=5)
+        except Exception:
+            continue
+
+        direct = extract_direct_images_from_html(html)
+        random.shuffle(direct)
+        for img in direct[:40]:
+            if len(images) >= limit:
+                break
+            if img not in seen and not url_is_known_bad(img):
+                seen.add(img)
+                images.append(img)
+
+        links = extract_article_links_from_html(html, page_url, max_links=28)
+        random.shuffle(links)
+        for link in links[:18]:
+            if len(images) >= limit:
+                break
+            img = extract_image_from_html_page(link)
+            if img and img not in seen and not url_is_known_bad(img):
+                seen.add(img)
+                images.append(img)
+
+    return images[:limit]
+
 def get_bbc_images(limit=MAX_IMAGE_POOL):
     now = time.time()
 
@@ -266,6 +414,24 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
         except Exception:
             continue
+
+    # Add page-scraped images after RSS. This is especially important for
+    # Reuters/AP, whose public RSS feeds often omit usable image tags.
+    if len(images) < limit:
+        try:
+            page_images = get_page_source_images(limit=max(120, limit - len(images)))
+            for img in page_images:
+                if len(images) >= limit:
+                    break
+                if img in seen or url_is_known_bad(img):
+                    continue
+                rejected = REJECT_CACHE.get(img)
+                if rejected and now - rejected["time"] < REJECT_CACHE_SECONDS:
+                    continue
+                seen.add(img)
+                images.append(img)
+        except Exception:
+            pass
 
     random.shuffle(images)
     IMAGE_CACHE["time"] = now
