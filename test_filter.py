@@ -167,6 +167,7 @@ TESTS = [
         "vertical composition inside landscape frame should be vertical-phone only",
     ),
 
+    ("https://dims.apnews.com/dims4/default/13836ae/2147483647/strip/true/crop/5731x3821+0+0/resize/1200x800!/format/webp/quality/90/?url=https://assets.apnews.com/37/ec/b2dcc1f33ed8d166ac9c79ecbdc4/ab6c2c492c46426bbacce28a0d8622e4", True, False, False, "repeating AP image should be hard blocked"),
 ]
 
 
