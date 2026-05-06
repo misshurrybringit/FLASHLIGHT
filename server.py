@@ -63,6 +63,7 @@ MIN_IMAGE_SHORT_SIDE = 480
 
 
 KNOWN_BAD_URL_FRAGMENTS = [
+    "f7e14700",
     # BBC graphic / logo cards
     "p0l7jnbt",
     "p0kxxp17",
@@ -318,6 +319,34 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
     return images[:limit]
 
+
+
+def image_is_low_detail_or_soft(data):
+    try:
+        arr = np.frombuffer(data, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    except Exception:
+        return False
+
+    if img is None or img.size == 0:
+        return False
+
+    h, w = img.shape[:2]
+
+    if w < 720 or h < 420:
+        return True
+
+    if max(w, h) > 900:
+        scale = 900.0 / max(w, h)
+        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+    if sharpness < 42:
+        return True
+
+    return False
 
 def image_is_probably_full_graphic_page(data):
     try:
@@ -1109,6 +1138,12 @@ class Handler(BaseHTTPRequestHandler):
 
                 except Exception:
                     test_data = data
+
+                if image_is_low_detail_or_soft(test_data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT low detail]", url)
+                    self.safe_send_bytes(415, b"Rejected low-detail image", extra_headers={"Cache-Control": "no-store"})
+                    return
 
                 if image_is_probably_full_graphic_page(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
