@@ -175,6 +175,13 @@ TESTS = [
         False,
         "generic isolated portrait should be rejected",
     ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/07da/live/f7e14700-486c-11f1-ba51-89e146a2916a.jpg",
+        True,
+        False,
+        False,
+        "generic portrait should be hard blocked",
+    ),
 ]
 
 
