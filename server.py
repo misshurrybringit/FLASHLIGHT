@@ -15,6 +15,7 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
+    # Broad world/news feeds. Excludes BBC science/business/tech/health/entertainment.
     "https://feeds.bbci.co.uk/news/rss.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
@@ -24,11 +25,7 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
     "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
     "https://feeds.bbci.co.uk/news/uk/rss.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
-    "https://feeds.bbci.co.uk/news/health/rss.xml",
     "https://feeds.apnews.com/rss/apf-topnews",
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
@@ -36,55 +33,80 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
+    # AP world/politics/regional pages.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
+    "https://apnews.com/hub/ap-top-news",
+    "https://apnews.com/hub/world-news",
+    "https://apnews.com/hub/us-news",
+    "https://apnews.com/hub/politics",
+    "https://apnews.com/hub/europe",
+    "https://apnews.com/hub/asia-pacific",
+    "https://apnews.com/hub/africa",
+    "https://apnews.com/hub/latin-america",
+    "https://apnews.com/hub/middle-east",
+    "https://apnews.com/hub/immigration",
+    "https://apnews.com/hub/natural-disasters",
+    "https://apnews.com/hub/ukraine",
+    "https://apnews.com/hub/russia-ukraine",
+    "https://apnews.com/hub/israel-hamas-war",
+
+    # Reuters world/regional/pictures pages.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
+    "https://www.reuters.com/world/europe/",
+    "https://www.reuters.com/world/china/",
+    "https://www.reuters.com/world/middle-east/",
+    "https://www.reuters.com/world/africa/",
+    "https://www.reuters.com/world/americas/",
     "https://www.reuters.com/pictures/",
+
+    # Guardian/NPR fallbacks.
+    "https://www.theguardian.com/world",
+    "https://www.theguardian.com/us-news",
+    "https://www.npr.org/sections/news/",
 ]
 
 
 # Direct public section pages. These are scraped for image URLs because several
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
-    # AP is favored because it tends to supply more event/scene photos than BBC cards.
+    # AP world/politics/regional pages.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
-    "https://apnews.com/sports",
-    "https://apnews.com/science",
-    "https://apnews.com/health",
-    "https://apnews.com/climate-and-environment",
-    "https://apnews.com/religion",
-    "https://apnews.com/technology",
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
     "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/business",
-    "https://apnews.com/hub/sports",
-    "https://apnews.com/hub/entertainment",
-    "https://apnews.com/hub/science",
+    "https://apnews.com/hub/europe",
+    "https://apnews.com/hub/asia-pacific",
+    "https://apnews.com/hub/africa",
+    "https://apnews.com/hub/latin-america",
+    "https://apnews.com/hub/middle-east",
+    "https://apnews.com/hub/immigration",
+    "https://apnews.com/hub/natural-disasters",
+    "https://apnews.com/hub/ukraine",
+    "https://apnews.com/hub/russia-ukraine",
+    "https://apnews.com/hub/israel-hamas-war",
 
-    # Reuters public pages can be inconsistent, but these are attempted briefly.
+    # Reuters world/regional/pictures pages.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
+    "https://www.reuters.com/world/europe/",
+    "https://www.reuters.com/world/china/",
+    "https://www.reuters.com/world/middle-east/",
+    "https://www.reuters.com/world/africa/",
+    "https://www.reuters.com/world/americas/",
     "https://www.reuters.com/pictures/",
 
-    # Extra public pages that usually expose straightforward image URLs.
+    # Other broad news pages.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
+    "https://www.bbc.com/news/world",
     "https://www.npr.org/sections/news/",
 ]
 
@@ -136,28 +158,32 @@ def url_needs_voice_crop(url):
     return any(fragment in url for fragment in VOICE_CROP_URL_FRAGMENTS)
 
 
+def url_is_disallowed_graphic_asset(url):
+    if not url:
+        return True
+    lower = url.lower()
+    if lower.endswith(".svg") or ".svg?" in lower:
+        return True
+    if "apnews" in lower and (lower.endswith(".png") or ".png?" in lower):
+        return True
+    if any(token in lower for token in ["typeshift", "pileup", "memoku"]):
+        return True
+    return False
+
+
+
+
 def image_url_looks_vertical_or_phone_crop(url):
-    """Fast URL-level guard for vertical AP/BBC crops before the proxy fetch."""
+    """Fast URL-level guard for portrait/phone crops before proxy fetch."""
     lower = (url or "").lower()
     if url_is_vertical_only(lower):
         return True
-    # AP dims crop/resize URLs often expose their aspect ratio in the URL.
-    # Reject obvious portrait/narrow crops before they reach the browser.
-    m = re.search(r"/crop/(\d+)x(\d+)", lower)
-    if m:
-        w, h = int(m.group(1)), int(m.group(2))
-        if h > w * 1.02:
-            return True
-    m = re.search(r"/resize/(\d+)x(\d+)!", lower)
-    if m:
-        w, h = int(m.group(1)), int(m.group(2))
-        if h > w * 1.02:
-            return True
-    m = re.search(r"/ic/(\d+)x(\d+)/", lower)
-    if m:
-        w, h = int(m.group(1)), int(m.group(2))
-        if h > w * 1.02:
-            return True
+    for pattern in (r"/crop/(\d+)x(\d+)", r"/resize/(\d+)x(\d+)!", r"/ic/(\d+)x(\d+)/"):
+        m = re.search(pattern, lower)
+        if m:
+            w, h = int(m.group(1)), int(m.group(2))
+            if h > w * 1.02:
+                return True
     return False
 
 
@@ -172,7 +198,6 @@ def image_bytes_are_vertical(data, max_ratio=1.02):
         return False
     h, w = img.shape[:2]
     return h > w * max_ratio
-
 
 def upgrade_bbc_image_url(url):
     if not url:
@@ -196,9 +221,7 @@ def clean_extracted_image_url(url):
     if not url.startswith("http"):
         return None
     lower = url.lower()
-    if lower.endswith(".svg") or ".svg?" in lower:
-        return None
-    if "apnews" in lower and ".png" in lower:
+    if url_is_disallowed_graphic_asset(lower):
         return None
     if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
         return None
@@ -458,7 +481,7 @@ def get_direct_page_images(limit=360):
         if not img:
             return False
         img = clean_extracted_image_url(img)
-        if not img or url_is_known_bad(img) or image_url_looks_vertical_or_phone_crop(img):
+        if not img or url_is_known_bad(img) or url_is_disallowed_graphic_asset(img) or image_url_looks_vertical_or_phone_crop(img):
             return False
         key = normalize_image_url_for_dedupe(img)
         if not key or key in seen:
@@ -544,7 +567,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         if not img:
             return False
         img = clean_extracted_image_url(img)
-        if not img or url_is_known_bad(img) or image_url_looks_vertical_or_phone_crop(img):
+        if not img or url_is_known_bad(img) or url_is_disallowed_graphic_asset(img) or image_url_looks_vertical_or_phone_crop(img):
             return False
         key = canonical_image_key(img)
         if not key or key in seen:
@@ -900,10 +923,8 @@ def render_html():
     random.shuffle(images)
     sequence = []
     for img in images:
-        if image_url_looks_vertical_or_phone_crop(img):
-            continue
         proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
-        sequence.append({"src": proxied, "raw": img, "verticalOnly": False})
+        sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
     sequence_json = json.dumps(sequence)
     return f'''<!DOCTYPE html>
 <html>
@@ -929,10 +950,7 @@ let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
-let badSrcs = new Set();
-const RECENT_LIMIT = 40;
-const IMAGE_CHANGE_MS = 5000;
-const IMAGE_LOAD_TIMEOUT_MS = 3200;
+const RECENT_LIMIT = 80;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -948,30 +966,14 @@ function shuffleArray(arr) {{ const a=arr.slice(); for(let i=a.length-1;i>0;i--)
 function isVerticalPhone() {{ return window.matchMedia("(pointer: coarse)").matches && window.innerHeight > window.innerWidth; }}
 function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly && !isVerticalPhone()); }}
 function refillPool() {{
-  let candidates = slides
-    .filter(slideAllowedForCurrentOrientation)
-    .map(s => s.src)
-    .filter(src => !badSrcs.has(src));
-
-  // If proxy rejections made the usable set too small, give the page a fresh chance.
-  if (candidates.length < 8 && badSrcs.size > 0) {{
-    badSrcs.clear();
-    candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
-  }}
-
+  let candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
   let fresh = candidates.filter(src => !recentlyShown.includes(src));
-  if (fresh.length < Math.min(12, candidates.length)) fresh = candidates;
-  shuffledPool = shuffleArray(fresh);
+  if (fresh.length < Math.min(20, candidates.length)) fresh = candidates;
+  shuffledPool = shuffleArray(fresh).slice(0, SEQUENCE_LENGTH_JS);
   poolIndex = 0;
-  console.log("rotation pool", {{ total: slides.length, usable: candidates.length, fresh: fresh.length, bad: badSrcs.size }});
 }}
-function getNextRandomSrc() {{
-  if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool();
-  if (!shuffledPool.length && badSrcs.size > 0) {{ badSrcs.clear(); refillPool(); }}
-  if (!shuffledPool.length) return null;
-  return shuffledPool[poolIndex++];
-}}
+function getNextRandomSrc() {{ if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool(); if (!shuffledPool.length) return null; return shuffledPool[poolIndex++]; }}
 function makeImage(sourceImage) {{
   const off = document.createElement("canvas"); off.width = canvas.width; off.height = canvas.height;
   const offCtx = off.getContext("2d", {{ willReadFrequently: true }}); syncContextQuality(offCtx);
@@ -1005,51 +1007,15 @@ function prepareAndDraw(img, src) {{
   const el = document.getElementById("debug-url"); el.textContent = rawUrl; el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
 }}
 function loadRandomSlide(attempts=0) {{
-  if (isLoadingSlide) return;
-  isLoadingSlide = true;
-  resizeCanvas();
-
-  if (!slides.length) {{ isLoadingSlide = false; drawFallbackMessage(); return; }}
-  if (attempts > 90) {{ isLoadingSlide = false; badSrcs.clear(); refillPool(); return; }}
-
-  const src = getNextRandomSrc();
-  if (!src) {{ isLoadingSlide = false; return; }}
-
-  const loader = new Image();
-  loader.decoding = "async";
-  let finished = false;
-
-  function failAndTryNext(reason) {{
-    if (finished) return;
-    finished = true;
-    badSrcs.add(src);
-    shuffledPool = shuffledPool.filter(s => s !== src);
-    isLoadingSlide = false;
-    console.log("skip image", reason, src);
-    setTimeout(() => loadRandomSlide(attempts + 1), 35);
-  }}
-
-  const watchdog = setTimeout(() => failAndTryNext("timeout"), IMAGE_LOAD_TIMEOUT_MS);
-
+  if (isLoadingSlide) return; isLoadingSlide = true; resizeCanvas();
+  if (!slides.length || attempts > 80) {{ isLoadingSlide=false; return; }}
+  const src = getNextRandomSrc(); if (!src) {{ isLoadingSlide=false; return; }}
+  const loader = new Image(); loader.decoding = "async";
   loader.onload = () => {{
-    if (finished) return;
-    clearTimeout(watchdog);
-
-    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{
-      failAndTryNext("vertical desktop");
-      return;
-    }}
-
-    finished = true;
-    prepareAndDraw(loader, src);
-    isLoadingSlide = false;
+    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{ slides = slides.filter(s => s.src !== src); shuffledPool = shuffledPool.filter(s => s !== src); isLoadingSlide=false; setTimeout(() => loadRandomSlide(attempts+1), 50); return; }}
+    prepareAndDraw(loader, src); isLoadingSlide=false;
   }};
-
-  loader.onerror = () => {{
-    clearTimeout(watchdog);
-    failAndTryNext("error");
-  }};
-
+  loader.onerror = () => {{ slides = slides.filter(s => s.src !== src); shuffledPool = shuffledPool.filter(s => s !== src); isLoadingSlide=false; setTimeout(() => loadRandomSlide(attempts+1), 50); }};
   loader.src = src;
 }}
 function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; drawFlashlight(); }}
@@ -1057,11 +1023,7 @@ canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
-resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide();
-setTimeout(function rotateSlides() {{
-  loadRandomSlide();
-  setTimeout(rotateSlides, IMAGE_CHANGE_MS);
-}}, IMAGE_CHANGE_MS);
+resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide(); setInterval(loadRandomSlide, 5000);
 </script>
 </body>
 </html>'''
@@ -1128,14 +1090,14 @@ class Handler(BaseHTTPRequestHandler):
             if not url:
                 self.safe_send_bytes(400, b"Missing image URL")
                 return
-            if url_is_known_bad(url):
+            if url_is_known_bad(url) or url_is_disallowed_graphic_asset(url):
                 REJECT_CACHE[url] = {"time": time.time()}
-                print("[REJECT known bad]", url)
+                print("[REJECT known bad/graphic asset]", url)
                 self.safe_send_bytes(415, b"Known bad image", extra_headers={"Cache-Control": "no-store"})
                 return
             if image_url_looks_vertical_or_phone_crop(url):
                 REJECT_CACHE[url] = {"time": time.time()}
-                print("[REJECT vertical url]", url)
+                print("[REJECT vertical URL]", url)
                 self.safe_send_bytes(415, b"Rejected vertical image", extra_headers={"Cache-Control": "no-store"})
                 return
             cleanup_proxy_cache()
@@ -1147,18 +1109,18 @@ class Handler(BaseHTTPRequestHandler):
                 data, content_type = fetch_bytes(url, timeout=8)
                 lower_url = url.lower()
                 lower_content_type = content_type.lower()
-                if (lower_url.endswith(".svg") or ".svg?" in lower_url or "svg" in lower_content_type):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT svg graphic]", url)
-                    self.safe_send_bytes(415, b"Rejected svg graphic", extra_headers={"Cache-Control": "no-store"})
-                    return
                 if not content_type.startswith("image/"):
                     REJECT_CACHE[url] = {"time": time.time()}
                     self.safe_send_bytes(415, b"Not an image", extra_headers={"Cache-Control": "no-store"})
                     return
+                if lower_url.endswith(".svg") or ".svg?" in lower_url or "svg" in lower_content_type:
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT svg graphic]", url)
+                    self.safe_send_bytes(415, b"Rejected svg graphic", extra_headers={"Cache-Control": "no-store"})
+                    return
                 if image_bytes_are_vertical(data):
                     REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT vertical dimensions]", url)
+                    print("[REJECT vertical bytes]", url)
                     self.safe_send_bytes(415, b"Rejected vertical image", extra_headers={"Cache-Control": "no-store"})
                     return
                 test_data = data
@@ -1223,3 +1185,4 @@ if __name__ == "__main__":
     print(f"Serving at http://localhost:{PORT}")
     print()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+
