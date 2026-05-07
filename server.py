@@ -142,6 +142,19 @@ def url_needs_voice_crop(url):
     return any(fragment in url for fragment in VOICE_CROP_URL_FRAGMENTS)
 
 
+def url_is_disallowed_graphic_asset(url):
+    if not url:
+        return True
+    lower = url.lower()
+    if lower.endswith(".svg") or ".svg?" in lower:
+        return True
+    if "apnews" in lower and (lower.endswith(".png") or ".png?" in lower):
+        return True
+    if any(token in lower for token in ["typeshift", "pileup", "memoku"]):
+        return True
+    return False
+
+
 def upgrade_bbc_image_url(url):
     if not url:
         return url
@@ -164,7 +177,16 @@ def clean_extracted_image_url(url):
     if not url.startswith("http"):
         return None
     lower = url.lower()
-    if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
+
+    # AP/other news CDNs also host SVG/PNG graphics and UI art. These are
+    # almost never the scene photos wanted for this project, so reject them
+    # before they ever enter the slide pool.
+    if lower.endswith(".svg") or ".svg?" in lower:
+        return None
+    if "apnews" in lower and (lower.endswith(".png") or ".png?" in lower):
+        return None
+
+    if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon", "type", "typeshift", "pileup", "memoku"]):
         return None
     return upgrade_bbc_image_url(url)
 
@@ -389,7 +411,6 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "npr.brightspotcdn.com",
             ".jpg",
             ".jpeg",
-            ".png",
             ".webp",
         ]):
             return False
@@ -461,7 +482,7 @@ def get_direct_page_images(limit=560):
         if not img:
             return False
         img = clean_extracted_image_url(img)
-        if not img or url_is_known_bad(img):
+        if not img or url_is_known_bad(img) or url_is_disallowed_graphic_asset(img):
             return False
         key = normalize_image_url_for_dedupe(img)
         if not key or key in seen:
@@ -610,7 +631,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         if not img:
             return False
         img = clean_extracted_image_url(img)
-        if not img or url_is_known_bad(img):
+        if not img or url_is_known_bad(img) or url_is_disallowed_graphic_asset(img):
             return False
         key = canonical_image_key(img)
         if not key or key in seen:
@@ -995,6 +1016,7 @@ canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 <canvas id="view"></canvas>
 <script>
 let slides = {sequence_json};
+slides = slides.filter(s => !/\.svg(\?|$)/i.test(s.raw || s.src) && !/(typeshift|pileup|memoku)/i.test(s.raw || s.src));
 const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
@@ -1084,7 +1106,14 @@ function loadRandomSlide(attempts=0) {{
   isLoadingSlide = true;
   resizeCanvas();
 
-  if (!slides.length || attempts > 120) {{
+  if (!slides.length || attempts > 160) {{
+    // If the session marked almost everything bad, clear the session-only list
+    // once so a temporary network failure doesn't trap the site on 3 images.
+    if (badSrcs.size > Math.max(20, slides.length * 0.65)) {{
+      console.log("clearing session bad list after too many failed attempts", badSrcs.size);
+      badSrcs.clear();
+      refillPool();
+    }}
     isLoadingSlide = false;
     return;
   }}
@@ -1194,10 +1223,10 @@ class Handler(BaseHTTPRequestHandler):
             if not url:
                 self.safe_send_bytes(400, b"Missing image URL")
                 return
-            if url_is_known_bad(url):
+            if url_is_known_bad(url) or url_is_disallowed_graphic_asset(url):
                 REJECT_CACHE[url] = {"time": time.time()}
-                print("[REJECT known bad]", url)
-                self.safe_send_bytes(415, b"Known bad image", extra_headers={"Cache-Control": "no-store"})
+                print("[REJECT known bad/graphic asset]", url)
+                self.safe_send_bytes(415, b"Known bad or graphic asset", extra_headers={"Cache-Control": "no-store"})
                 return
             cleanup_proxy_cache()
             cached = PROXY_CACHE.get(url)
@@ -1209,6 +1238,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not content_type.startswith("image/"):
                     REJECT_CACHE[url] = {"time": time.time()}
                     self.safe_send_bytes(415, b"Not an image", extra_headers={"Cache-Control": "no-store"})
+                    return
+                if "svg" in content_type.lower() or url_is_disallowed_graphic_asset(url):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT svg/png graphic asset]", url)
+                    self.safe_send_bytes(415, b"Rejected graphic asset", extra_headers={"Cache-Control": "no-store"})
                     return
                 test_data = data
                 try:
