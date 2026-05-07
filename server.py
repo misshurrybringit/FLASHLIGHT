@@ -15,6 +15,9 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
+    # Scene-first feeds. Removed BBC business / technology / health /
+    # entertainment / science because they often produce headshots, podiums,
+    # product shots, studio portraits, and generic cropped editorial images.
     "https://feeds.bbci.co.uk/news/rss.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
@@ -24,12 +27,7 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
     "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
     "https://feeds.bbci.co.uk/news/uk/rss.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
-    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
-    "https://feeds.bbci.co.uk/news/health/rss.xml",
     "https://feeds.apnews.com/rss/apf-topnews",
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
@@ -37,16 +35,16 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
+    # AP/Reuters sections that tend to return event scenes instead of generic
+    # tech/business/entertainment portrait cards.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
+    "https://apnews.com/sports",
+    "https://apnews.com/climate-and-environment",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
     "https://www.reuters.com/pictures/",
 ]
 
@@ -55,32 +53,24 @@ SOURCE_PAGES = [
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
     # AP is favored because it tends to supply more event/scene photos than BBC cards.
+    # Removed AP business / entertainment / technology / health / science hubs because
+    # they often add generic portraits, product shots, conference panels, and crops.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
     "https://apnews.com/sports",
-    "https://apnews.com/science",
-    "https://apnews.com/health",
     "https://apnews.com/climate-and-environment",
     "https://apnews.com/religion",
-    "https://apnews.com/technology",
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
     "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/business",
     "https://apnews.com/hub/sports",
-    "https://apnews.com/hub/entertainment",
-    "https://apnews.com/hub/science",
 
     # Reuters public pages can be inconsistent, but these are attempted briefly.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
     "https://www.reuters.com/pictures/",
 
     # Extra public pages that usually expose straightforward image URLs.
