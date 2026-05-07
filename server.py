@@ -26,7 +26,6 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/uk/rss.xml",
     "https://feeds.bbci.co.uk/news/business/rss.xml",
     "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
     "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
     "https://feeds.bbci.co.uk/news/health/rss.xml",
@@ -113,6 +112,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "00a03cc0", "929fd780", "06449360", "f4ee5fc0",
     "cfcd74b0", "7488a0b0", "72e83b70", "acb55400",
     "5a8f0590",
+    "typeshift.svg", "pileup.svg", "memoku.svg",
+    "f0ccbee0",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -133,6 +134,44 @@ def url_is_vertical_only(url):
 
 def url_needs_voice_crop(url):
     return any(fragment in url for fragment in VOICE_CROP_URL_FRAGMENTS)
+
+
+def image_url_looks_vertical_or_phone_crop(url):
+    """Fast URL-level guard for vertical AP/BBC crops before the proxy fetch."""
+    lower = (url or "").lower()
+    if url_is_vertical_only(lower):
+        return True
+    # AP dims crop/resize URLs often expose their aspect ratio in the URL.
+    # Reject obvious portrait/narrow crops before they reach the browser.
+    m = re.search(r"/crop/(\d+)x(\d+)", lower)
+    if m:
+        w, h = int(m.group(1)), int(m.group(2))
+        if h > w * 1.02:
+            return True
+    m = re.search(r"/resize/(\d+)x(\d+)!", lower)
+    if m:
+        w, h = int(m.group(1)), int(m.group(2))
+        if h > w * 1.02:
+            return True
+    m = re.search(r"/ic/(\d+)x(\d+)/", lower)
+    if m:
+        w, h = int(m.group(1)), int(m.group(2))
+        if h > w * 1.02:
+            return True
+    return False
+
+
+def image_bytes_are_vertical(data, max_ratio=1.02):
+    """Decode enough to reject true vertical images at the proxy level."""
+    try:
+        arr = np.frombuffer(data, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    except Exception:
+        return False
+    if img is None or img.size == 0:
+        return False
+    h, w = img.shape[:2]
+    return h > w * max_ratio
 
 
 def upgrade_bbc_image_url(url):
@@ -157,6 +196,10 @@ def clean_extracted_image_url(url):
     if not url.startswith("http"):
         return None
     lower = url.lower()
+    if lower.endswith(".svg") or ".svg?" in lower:
+        return None
+    if "apnews" in lower and ".png" in lower:
+        return None
     if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
         return None
     return upgrade_bbc_image_url(url)
@@ -415,7 +458,7 @@ def get_direct_page_images(limit=360):
         if not img:
             return False
         img = clean_extracted_image_url(img)
-        if not img or url_is_known_bad(img):
+        if not img or url_is_known_bad(img) or image_url_looks_vertical_or_phone_crop(img):
             return False
         key = normalize_image_url_for_dedupe(img)
         if not key or key in seen:
@@ -501,7 +544,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         if not img:
             return False
         img = clean_extracted_image_url(img)
-        if not img or url_is_known_bad(img):
+        if not img or url_is_known_bad(img) or image_url_looks_vertical_or_phone_crop(img):
             return False
         key = canonical_image_key(img)
         if not key or key in seen:
@@ -857,8 +900,10 @@ def render_html():
     random.shuffle(images)
     sequence = []
     for img in images:
+        if image_url_looks_vertical_or_phone_crop(img):
+            continue
         proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
-        sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
+        sequence.append({"src": proxied, "raw": img, "verticalOnly": False})
     sequence_json = json.dumps(sequence)
     return f'''<!DOCTYPE html>
 <html>
@@ -1012,7 +1057,11 @@ canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
-resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide(); setInterval(loadRandomSlide, IMAGE_CHANGE_MS);
+resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide();
+setTimeout(function rotateSlides() {{
+  loadRandomSlide();
+  setTimeout(rotateSlides, IMAGE_CHANGE_MS);
+}}, IMAGE_CHANGE_MS);
 </script>
 </body>
 </html>'''
@@ -1084,6 +1133,11 @@ class Handler(BaseHTTPRequestHandler):
                 print("[REJECT known bad]", url)
                 self.safe_send_bytes(415, b"Known bad image", extra_headers={"Cache-Control": "no-store"})
                 return
+            if image_url_looks_vertical_or_phone_crop(url):
+                REJECT_CACHE[url] = {"time": time.time()}
+                print("[REJECT vertical url]", url)
+                self.safe_send_bytes(415, b"Rejected vertical image", extra_headers={"Cache-Control": "no-store"})
+                return
             cleanup_proxy_cache()
             cached = PROXY_CACHE.get(url)
             if cached and time.time() - cached["time"] < PROXY_CACHE_SECONDS:
@@ -1091,9 +1145,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 data, content_type = fetch_bytes(url, timeout=8)
+                lower_url = url.lower()
+                lower_content_type = content_type.lower()
+                if (lower_url.endswith(".svg") or ".svg?" in lower_url or "svg" in lower_content_type):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT svg graphic]", url)
+                    self.safe_send_bytes(415, b"Rejected svg graphic", extra_headers={"Cache-Control": "no-store"})
+                    return
                 if not content_type.startswith("image/"):
                     REJECT_CACHE[url] = {"time": time.time()}
                     self.safe_send_bytes(415, b"Not an image", extra_headers={"Cache-Control": "no-store"})
+                    return
+                if image_bytes_are_vertical(data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT vertical dimensions]", url)
+                    self.safe_send_bytes(415, b"Rejected vertical image", extra_headers={"Cache-Control": "no-store"})
                     return
                 test_data = data
                 try:
