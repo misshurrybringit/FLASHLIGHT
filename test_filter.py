@@ -32,6 +32,7 @@ def main():
     failures = 0
 
     for url, expected_bad, expected_vertical, label in TESTS:
+
         got_bad = url_is_known_bad(url)
         got_vertical = url_is_vertical_only(url)
 
