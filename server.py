@@ -110,8 +110,8 @@ PROXY_CACHE_MAX_ITEMS = 420
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
 
-MIN_IMAGE_WIDTH = 760
-MIN_IMAGE_HEIGHT = 430
+MIN_IMAGE_WIDTH = 720
+MIN_IMAGE_HEIGHT = 420
 
 KNOWN_BAD_URL_FRAGMENTS = [
     "p0l7jnbt", "p0kxxp17", "p0n9y769", "3a08bc10", "b9785300",
@@ -1041,10 +1041,24 @@ function shuffleArray(arr) {{ const a=arr.slice(); for(let i=a.length-1;i>0;i--)
 function isVerticalPhone() {{ return window.matchMedia("(pointer: coarse)").matches && window.innerHeight > window.innerWidth; }}
 function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly && !isVerticalPhone()); }}
 function refillPool() {{
-  let candidates = slides
+  let baseCandidates = slides
     .filter(slideAllowedForCurrentOrientation)
-    .map(s => s.src)
-    .filter(src => !badSrcs.has(src));
+    .map(s => s.src);
+
+  let candidates = baseCandidates.filter(src => !badSrcs.has(src));
+
+  // If temporary proxy/network failures collapsed the usable pool, recover.
+  // This prevents the page from getting trapped on 3-4 working images.
+  if (candidates.length < 18 && badSrcs.size > 0 && baseCandidates.length > candidates.length) {{
+    console.log("rotation collapsed; clearing session bad list", {{
+      totalSlides: slides.length,
+      base: baseCandidates.length,
+      usable: candidates.length,
+      bad: badSrcs.size
+    }});
+    badSrcs.clear();
+    candidates = baseCandidates.slice();
+  }}
 
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
 
@@ -1052,7 +1066,7 @@ function refillPool() {{
 
   // If the surviving pool is smaller than recent memory, relax recent memory
   // instead of forcing the page to repeat one tiny subset forever.
-  if (fresh.length < Math.min(12, candidates.length)) fresh = candidates;
+  if (fresh.length < Math.min(8, candidates.length)) fresh = candidates;
 
   shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
@@ -1276,11 +1290,9 @@ class Handler(BaseHTTPRequestHandler):
                     print("[REJECT graphic]", url)
                     self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                     return
-                if image_is_portrait_or_generic_isolated_subject(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT portrait/generic isolated]", url)
-                    self.safe_send_bytes(415, b"Rejected portrait or generic isolated subject", extra_headers={"Cache-Control": "no-store"})
-                    return
+                # Do NOT reject portraits/generic isolated subjects at proxy time.
+                # That filter was too aggressive and collapsed the live rotation to only a few survivors.
+                # Keep URL rules + SVG/PNG/graphic/divider/low-res rejection, but let the frontend rotate a larger pool.
                 if image_has_center_divider(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
                     print("[REJECT divider]", url)
