@@ -35,14 +35,27 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
-    # AP/Reuters sections that tend to return event scenes instead of generic
-    # tech/business/entertainment portrait cards.
+    # Political/world/event-heavy sources only. Removed sports, entertainment,
+    # business, tech, lifestyle-style pages because they add random portraits
+    # and non-political culture images.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/sports",
     "https://apnews.com/climate-and-environment",
+    "https://apnews.com/hub/ap-top-news",
+    "https://apnews.com/hub/world-news",
+    "https://apnews.com/hub/us-news",
+    "https://apnews.com/hub/politics",
+    "https://apnews.com/hub/europe",
+    "https://apnews.com/hub/asia-pacific",
+    "https://apnews.com/hub/africa",
+    "https://apnews.com/hub/latin-america",
+    "https://apnews.com/hub/middle-east",
+    "https://apnews.com/hub/immigration",
+    "https://apnews.com/hub/natural-disasters",
+    "https://apnews.com/hub/ukraine",
+    "https://apnews.com/hub/israel-hamas-war",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
     "https://www.reuters.com/pictures/",
@@ -52,25 +65,17 @@ SOURCE_PAGES = [
 # Direct public section pages. These are scraped for image URLs because several
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
-    # AP is favored because it tends to supply more event/scene photos than BBC cards.
-    # Removed AP business / entertainment / technology / health / science hubs because
-    # they often add generic portraits, product shots, conference panels, and crops.
+    # AP politics/world/top news. No sports, religion, entertainment,
+    # business, tech, or generic photo-gallery hubs.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/sports",
     "https://apnews.com/climate-and-environment",
-    "https://apnews.com/religion",
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
     "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/sports",
-    "https://apnews.com/hub/photography",
-    "https://apnews.com/hub/photos",
-    "https://apnews.com/hub/photo-gallery",
-    "https://apnews.com/hub/ap-photos",
     "https://apnews.com/hub/europe",
     "https://apnews.com/hub/asia-pacific",
     "https://apnews.com/hub/africa",
@@ -81,12 +86,12 @@ DIRECT_IMAGE_PAGES = [
     "https://apnews.com/hub/ukraine",
     "https://apnews.com/hub/israel-hamas-war",
 
-    # Reuters public pages can be inconsistent, but these are attempted briefly.
+    # Reuters world/news pages.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
     "https://www.reuters.com/pictures/",
 
-    # Extra public pages that usually expose straightforward image URLs.
+    # Guardian/NPR world/news fallbacks.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
     "https://www.npr.org/sections/news/",
@@ -140,6 +145,32 @@ def url_is_vertical_only(url):
 
 def url_needs_voice_crop(url):
     return any(fragment in url for fragment in VOICE_CROP_URL_FRAGMENTS)
+
+
+POLITICAL_OR_SCENE_LINK_KEYWORDS = [
+    "politics", "election", "congress", "senate", "supreme-court",
+    "white-house", "trump", "biden", "government", "protest",
+    "war", "ukraine", "russia", "israel", "gaza", "hamas",
+    "immigration", "border", "climate", "disaster", "world",
+    "europe", "asia", "africa", "latin-america", "middle-east",
+    "us-news", "ap-top-news", "police", "court", "strike",
+]
+
+REJECT_TOPIC_LINK_KEYWORDS = [
+    "entertainment", "celebrity", "movies", "music", "sports",
+    "business", "technology", "science", "health", "lifestyle",
+    "travel", "food", "fashion", "review", "television", "tv",
+]
+
+
+def link_is_relevant_news_scene(link):
+    lower = (link or "").lower()
+    if any(skip in lower for skip in REJECT_TOPIC_LINK_KEYWORDS):
+        return False
+    # Reuters/AP home pages can have short paths; allow them through.
+    if lower.rstrip("/") in ["https://apnews.com", "https://www.reuters.com"]:
+        return True
+    return any(token in lower for token in POLITICAL_OR_SCENE_LINK_KEYWORDS)
 
 
 def url_is_disallowed_graphic_asset(url):
@@ -272,11 +303,19 @@ def extract_article_links_from_html(html, base_url, max_links=40):
         if any(domain in lower for domain in ["apnews.com", "reuters.com"]):
             if len(lower.rstrip('/').split('/')) < 4:
                 continue
+        if not link_is_relevant_news_scene(link):
+            continue
         seen.add(link)
         links.append(link)
         if len(links) >= max_links:
             break
-    return links
+
+    # Put politics/world/conflict/disaster links first, but keep variety inside that set.
+    priority = [l for l in links if any(k in l.lower() for k in POLITICAL_OR_SCENE_LINK_KEYWORDS)]
+    fallback = [l for l in links if l not in priority]
+    random.shuffle(priority)
+    random.shuffle(fallback)
+    return (priority + fallback)[:max_links]
 
 
 def extract_inline_images_from_html(html, base_url, max_images=35):
@@ -1290,9 +1329,11 @@ class Handler(BaseHTTPRequestHandler):
                     print("[REJECT graphic]", url)
                     self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                     return
-                # Do NOT reject portraits/generic isolated subjects at proxy time.
-                # That filter was too aggressive and collapsed the live rotation to only a few survivors.
-                # Keep URL rules + SVG/PNG/graphic/divider/low-res rejection, but let the frontend rotate a larger pool.
+                if image_is_portrait_or_generic_isolated_subject(test_data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT portrait/generic isolated subject]", url)
+                    self.safe_send_bytes(415, b"Rejected portrait/generic isolated subject", extra_headers={"Cache-Control": "no-store"})
+                    return
                 if image_has_center_divider(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
                     print("[REJECT divider]", url)
