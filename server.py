@@ -1002,7 +1002,8 @@ let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
-const RECENT_LIMIT = 260;
+let badSrcs = new Set();
+const RECENT_LIMIT = 40;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -1018,12 +1019,29 @@ function shuffleArray(arr) {{ const a=arr.slice(); for(let i=a.length-1;i>0;i--)
 function isVerticalPhone() {{ return window.matchMedia("(pointer: coarse)").matches && window.innerHeight > window.innerWidth; }}
 function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly && !isVerticalPhone()); }}
 function refillPool() {{
-  let candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
+  let candidates = slides
+    .filter(slideAllowedForCurrentOrientation)
+    .map(s => s.src)
+    .filter(src => !badSrcs.has(src));
+
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
+
   let fresh = candidates.filter(src => !recentlyShown.includes(src));
-  if (fresh.length < Math.min(20, candidates.length)) fresh = candidates;
+
+  // If the surviving pool is smaller than recent memory, relax recent memory
+  // instead of forcing the page to repeat one tiny subset forever.
+  if (fresh.length < Math.min(12, candidates.length)) fresh = candidates;
+
   shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
+
+  console.log("rotation pool", {{
+    totalSlides: slides.length,
+    usable: candidates.length,
+    fresh: fresh.length,
+    bad: badSrcs.size,
+    recent: recentlyShown.length
+  }});
 }}
 function getNextRandomSrc() {{ if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool(); if (!shuffledPool.length) return null; return shuffledPool[poolIndex++]; }}
 function makeImage(sourceImage) {{
@@ -1056,18 +1074,51 @@ function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
   recentlyShown.push(src); if (recentlyShown.length > RECENT_LIMIT) recentlyShown.shift();
   const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
-  const el = document.getElementById("debug-url"); el.textContent = rawUrl + "  [" + recentlyShown.length + "/" + slides.length + "]"; el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
+  const usableEstimate = Math.max(0, slides.length - badSrcs.size);
+  const el = document.getElementById("debug-url");
+  el.textContent = rawUrl + "  [recent " + recentlyShown.length + " / usable ~" + usableEstimate + " / bad " + badSrcs.size + "]";
+  el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
 }}
 function loadRandomSlide(attempts=0) {{
-  if (isLoadingSlide) return; isLoadingSlide = true; resizeCanvas();
-  if (!slides.length || attempts > 80) {{ isLoadingSlide=false; return; }}
-  const src = getNextRandomSrc(); if (!src) {{ isLoadingSlide=false; return; }}
-  const loader = new Image(); loader.decoding = "async";
+  if (isLoadingSlide) return;
+  isLoadingSlide = true;
+  resizeCanvas();
+
+  if (!slides.length || attempts > 120) {{
+    isLoadingSlide = false;
+    return;
+  }}
+
+  const src = getNextRandomSrc();
+  if (!src) {{
+    isLoadingSlide = false;
+    return;
+  }}
+
+  const loader = new Image();
+  loader.decoding = "async";
+
   loader.onload = () => {{
-    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{ slides = slides.filter(s => s.src !== src); shuffledPool = shuffledPool.filter(s => s !== src); isLoadingSlide=false; setTimeout(() => loadRandomSlide(attempts+1), 50); return; }}
-    prepareAndDraw(loader, src); isLoadingSlide=false;
+    // Do not delete from slides. Mark unusable for this session only.
+    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{
+      badSrcs.add(src);
+      shuffledPool = shuffledPool.filter(s => s !== src);
+      isLoadingSlide = false;
+      setTimeout(() => loadRandomSlide(attempts + 1), 30);
+      return;
+    }}
+
+    prepareAndDraw(loader, src);
+    isLoadingSlide = false;
   }};
-  loader.onerror = () => {{ slides = slides.filter(s => s.src !== src); shuffledPool = shuffledPool.filter(s => s !== src); isLoadingSlide=false; setTimeout(() => loadRandomSlide(attempts+1), 50); }};
+
+  loader.onerror = () => {{
+    badSrcs.add(src);
+    shuffledPool = shuffledPool.filter(s => s !== src);
+    isLoadingSlide = false;
+    setTimeout(() => loadRandomSlide(attempts + 1), 30);
+  }};
+
   loader.src = src;
 }}
 function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; drawFlashlight(); }}
