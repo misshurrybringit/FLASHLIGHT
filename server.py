@@ -54,6 +54,7 @@ SOURCE_PAGES = [
 # Direct public section pages. These are scraped for image URLs because several
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
+    # AP is favored because it tends to supply more event/scene photos than BBC cards.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
@@ -62,10 +63,24 @@ DIRECT_IMAGE_PAGES = [
     "https://apnews.com/entertainment",
     "https://apnews.com/sports",
     "https://apnews.com/science",
+    "https://apnews.com/health",
+    "https://apnews.com/climate-and-environment",
+    "https://apnews.com/religion",
+    "https://apnews.com/technology",
+    "https://apnews.com/hub/ap-top-news",
+    "https://apnews.com/hub/world-news",
+    "https://apnews.com/hub/us-news",
+    "https://apnews.com/hub/politics",
+    "https://apnews.com/hub/business",
+    "https://apnews.com/hub/sports",
+    "https://apnews.com/hub/entertainment",
+    "https://apnews.com/hub/science",
 
     # Reuters public pages can be inconsistent, but these are attempted briefly.
     "https://www.reuters.com/world/",
+    "https://www.reuters.com/world/us/",
     "https://www.reuters.com/business/",
+    "https://www.reuters.com/technology/",
     "https://www.reuters.com/pictures/",
 
     # Extra public pages that usually expose straightforward image URLs.
@@ -76,8 +91,8 @@ DIRECT_IMAGE_PAGES = [
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-MAX_IMAGE_POOL = 1100
-SEQUENCE_LENGTH = 900
+MAX_IMAGE_POOL = 1400
+SEQUENCE_LENGTH = 1100
 IMAGE_CACHE = {"time": 0, "images": []}
 CACHE_SECONDS = 60
 
@@ -88,8 +103,8 @@ PROXY_CACHE_MAX_ITEMS = 420
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
 
-MIN_IMAGE_WIDTH = 720
-MIN_IMAGE_HEIGHT = 420
+MIN_IMAGE_WIDTH = 760
+MIN_IMAGE_HEIGHT = 430
 
 KNOWN_BAD_URL_FRAGMENTS = [
     "p0l7jnbt", "p0kxxp17", "p0n9y769", "3a08bc10", "b9785300",
@@ -379,14 +394,35 @@ def extract_image_urls_from_html(html, base_url, limit=80):
     return found[:limit]
 
 
-def get_direct_page_images(limit=220):
+def get_direct_page_images(limit=360):
     images = []
     seen = set()
     pages = DIRECT_IMAGE_PAGES[:]
-    random.shuffle(pages)
+
+    # AP first, then everything else shuffled.
+    ap_pages = [p for p in pages if "apnews.com" in p]
+    other_pages = [p for p in pages if "apnews.com" not in p]
+    random.shuffle(ap_pages)
+    random.shuffle(other_pages)
+    pages = ap_pages + other_pages
 
     start_time = time.time()
-    page_budget_seconds = 5.0
+    page_budget_seconds = 8.0
+    article_scrape_budget = 70
+    article_scrapes = 0
+
+    def add_candidate(img):
+        if not img:
+            return False
+        img = clean_extracted_image_url(img)
+        if not img or url_is_known_bad(img):
+            return False
+        key = normalize_image_url_for_dedupe(img)
+        if not key or key in seen:
+            return False
+        seen.add(key)
+        images.append(img)
+        return True
 
     for page_url in pages:
         if len(images) >= limit:
@@ -395,28 +431,44 @@ def get_direct_page_images(limit=220):
             break
 
         try:
-            html = fetch_text(page_url, timeout=2.5)
-            candidates = extract_image_urls_from_html(html, page_url, limit=70)
+            html = fetch_text(page_url, timeout=2.8)
+
+            # Inline images from section pages.
+            candidates = extract_image_urls_from_html(html, page_url, limit=110)
             random.shuffle(candidates)
-
             for img in candidates:
-                key = normalize_image_url_for_dedupe(img)
-                if not key or key in seen:
-                    continue
-                if url_is_known_bad(img):
-                    continue
-
-                seen.add(key)
-                images.append(img)
-
+                add_candidate(img)
                 if len(images) >= limit:
                     break
+
+            # Follow article links, especially useful for AP, where article pages
+            # expose og:image/dims URLs more reliably than RSS.
+            links = extract_article_links_from_html(
+                html,
+                page_url,
+                max_links=55 if "apnews.com" in page_url else 18,
+            )
+            random.shuffle(links)
+            for link in links:
+                if len(images) >= limit or article_scrapes >= article_scrape_budget:
+                    break
+                article_scrapes += 1
+                try:
+                    article_html = fetch_text(link, timeout=2.5)
+                    article_imgs = extract_image_urls_from_html(article_html, link, limit=8)
+                    # og/twitter image usually comes first and is more article-relevant.
+                    for img in article_imgs[:4]:
+                        add_candidate(img)
+                        if len(images) >= limit:
+                            break
+                except Exception:
+                    continue
+
         except Exception:
             continue
 
     random.shuffle(images)
     return images[:limit]
-
 
 def extract_image_from_html_page(url):
     try:
@@ -488,10 +540,16 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         except Exception:
             continue
 
+    # Add a first pass from direct section pages, with AP favored.
+    for img in get_direct_page_images(limit=360):
+        if len(images) >= limit:
+            break
+        add_image(img)
+
     pages = SOURCE_PAGES[:]
     random.shuffle(pages)
     page_article_scrapes = 0
-    page_article_scrape_budget = 18
+    page_article_scrape_budget = 46
     for page_url in pages:
         if len(images) >= limit:
             break
@@ -601,6 +659,146 @@ def crop_top_if_needed(img, url=""):
     except Exception:
         return img, False
 
+
+
+def get_cv2_face_cascade():
+    """Return OpenCV's bundled frontal-face cascade if available."""
+    try:
+        cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+        cascade = cv2.CascadeClassifier(cascade_path)
+        if cascade.empty():
+            return None
+        return cascade
+    except Exception:
+        return None
+
+
+def image_is_portrait_or_generic_isolated_subject(data):
+    """
+    Reject images that read like a single cut-out/portrait rather than a news scene.
+
+    This catches:
+    - centered single faces / headshots
+    - cropped isolated people/objects on smooth generic backgrounds
+    - vertical/cropped editorial photos that survive URL rules
+    It tries not to reject crowds, landscapes, street scenes, or busy interiors.
+    """
+    try:
+        arr = np.frombuffer(data, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    except Exception:
+        return False
+
+    if img is None or img.size == 0:
+        return False
+
+    h, w = img.shape[:2]
+    if w < 120 or h < 120:
+        return False
+
+    # No verticals / phone crops in the main pool.
+    if h > w * 1.05:
+        return True
+
+    # Work at a stable analysis size.
+    target_w = 640
+    if w > target_w:
+        scale = target_w / float(w)
+        img = cv2.resize(img, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
+        h, w = img.shape[:2]
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    # 1) Face/headshot rejection. Small crowd faces should pass; big centered faces do not.
+    cascade = get_cv2_face_cascade()
+    if cascade is not None:
+        faces = cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.08,
+            minNeighbors=5,
+            minSize=(max(34, int(w * 0.055)), max(34, int(h * 0.075))),
+        )
+        if len(faces) == 1:
+            x, y, fw, fh = faces[0]
+            face_area = (fw * fh) / float(w * h)
+            cx = (x + fw / 2) / float(w)
+            cy = (y + fh / 2) / float(h)
+            centered = 0.25 < cx < 0.75 and 0.10 < cy < 0.62
+            if centered and face_area > 0.012:
+                return True
+        elif len(faces) == 2:
+            total_area = sum((fw * fh) for (x, y, fw, fh) in faces) / float(w * h)
+            if total_area > 0.035:
+                return True
+        elif len(faces) >= 3:
+            # Crowds/scenes often have many tiny faces; only reject when faces dominate.
+            total_area = sum((fw * fh) for (x, y, fw, fh) in faces) / float(w * h)
+            if total_area > 0.075:
+                return True
+
+    # 2) Generic background / isolated subject rejection.
+    edges = cv2.Canny(gray, 60, 155)
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+
+    # Border is a proxy for plain studio/wall/sky/background.
+    border_mask = np.zeros((h, w), dtype=bool)
+    b_y = max(10, int(h * 0.13))
+    b_x = max(10, int(w * 0.10))
+    border_mask[:b_y, :] = True
+    border_mask[-b_y:, :] = True
+    border_mask[:, :b_x] = True
+    border_mask[:, -b_x:] = True
+
+    center_mask = np.zeros((h, w), dtype=bool)
+    center_mask[int(h * 0.16):int(h * 0.88), int(w * 0.22):int(w * 0.78)] = True
+
+    border_edge = float(np.mean(edges[border_mask] > 0))
+    center_edge = float(np.mean(edges[center_mask] > 0))
+    border_std = float(np.std(gray[border_mask]))
+    border_sat_std = float(np.std(sat[border_mask]))
+    border_sat_mean = float(np.mean(sat[border_mask]))
+    border_val_mean = float(np.mean(val[border_mask]))
+
+    # Count color variety in the border. Generic backgrounds have low variety.
+    sample = cv2.resize(img, (120, max(68, int(h * 120 / w))), interpolation=cv2.INTER_AREA)
+    sh, sw = sample.shape[:2]
+    smask = np.zeros((sh, sw), dtype=bool)
+    sy = max(5, int(sh * 0.13))
+    sx = max(5, int(sw * 0.10))
+    smask[:sy, :] = True
+    smask[-sy:, :] = True
+    smask[:, :sx] = True
+    smask[:, -sx:] = True
+    quant = (sample // 24).astype(np.uint8)
+    border_unique = len(np.unique(quant[smask].reshape(-1, 3), axis=0))
+
+    plain_background = (
+        (border_edge < 0.030 and border_std < 42 and border_unique < 95)
+        or (border_edge < 0.022 and border_sat_std < 30 and border_unique < 80)
+        or (border_edge < 0.020 and border_sat_mean < 55 and border_val_mean > 92)
+    )
+    isolated_subject = center_edge > max(0.052, border_edge * 2.15)
+
+    if plain_background and isolated_subject:
+        return True
+
+    # 3) Reject obvious single-person waist-up crops even if the face detector misses.
+    # Skin-ish blob centered + low-detail border is usually a generic portrait.
+    y0, y1 = int(h * 0.08), int(h * 0.78)
+    x0, x1 = int(w * 0.20), int(w * 0.80)
+    crop_hsv = hsv[y0:y1, x0:x1, :]
+    if crop_hsv.size:
+        hue = crop_hsv[:, :, 0]
+        sat_c = crop_hsv[:, :, 1]
+        val_c = crop_hsv[:, :, 2]
+        skinish = ((hue < 24) | (hue > 165)) & (sat_c > 35) & (sat_c < 185) & (val_c > 55)
+        skinish_frac = float(np.mean(skinish))
+        if skinish_frac > 0.085 and border_edge < 0.038 and border_unique < 125:
+            return True
+
+    return False
 
 def image_has_center_divider(data):
     try:
@@ -874,6 +1072,11 @@ class Handler(BaseHTTPRequestHandler):
                     print("[REJECT graphic]", url)
                     self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                     return
+                if image_is_portrait_or_generic_isolated_subject(test_data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT portrait/generic isolated]", url)
+                    self.safe_send_bytes(415, b"Rejected portrait or generic isolated subject", extra_headers={"Cache-Control": "no-store"})
+                    return
                 if image_has_center_divider(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
                     print("[REJECT divider]", url)
@@ -899,4 +1102,3 @@ if __name__ == "__main__":
     print(f"Serving at http://localhost:{PORT}")
     print()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
-
