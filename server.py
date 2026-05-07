@@ -35,77 +35,42 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
-    # Political/world/event-heavy sources only. Removed sports, entertainment,
-    # business, tech, lifestyle-style pages because they add random portraits
-    # and non-political culture images.
+    # AP/Reuters sections that tend to return event scenes instead of generic
+    # tech/business/entertainment portrait cards.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
+    "https://apnews.com/sports",
     "https://apnews.com/climate-and-environment",
-    "https://apnews.com/hub/ap-top-news",
-    "https://apnews.com/hub/world-news",
-    "https://apnews.com/hub/us-news",
-    "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/europe",
-    "https://apnews.com/hub/asia-pacific",
-    "https://apnews.com/hub/africa",
-    "https://apnews.com/hub/latin-america",
-    "https://apnews.com/hub/middle-east",
-    "https://apnews.com/hub/immigration",
-    "https://apnews.com/hub/natural-disasters",
-    "https://apnews.com/hub/ukraine",
-    "https://apnews.com/hub/israel-hamas-war",
-
-    # Extra AP regional/conflict hubs.
-    "https://apnews.com/hub/united-nations",
-    "https://apnews.com/hub/china",
-    "https://apnews.com/hub/india",
-    "https://apnews.com/hub/north-korea",
-    "https://apnews.com/hub/south-korea",
-    "https://apnews.com/hub/taiwan",
-    "https://apnews.com/hub/iran",
-    "https://apnews.com/hub/syria",
-    "https://apnews.com/hub/yemen",
-    "https://apnews.com/hub/venezuela",
-    "https://apnews.com/hub/mexico",
-    "https://apnews.com/hub/brazil",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
     "https://www.reuters.com/pictures/",
-
-    # Extra regional Reuters/Guardian/NPR pages for broader geography.
-    "https://www.reuters.com/world/africa/",
-    "https://www.reuters.com/world/americas/",
-    "https://www.reuters.com/world/asia-pacific/",
-    "https://www.reuters.com/world/china/",
-    "https://www.reuters.com/world/europe/",
-    "https://www.reuters.com/world/india/",
-    "https://www.reuters.com/world/middle-east/",
-    "https://www.reuters.com/world/uk/",
-    "https://www.theguardian.com/world/africa",
-    "https://www.theguardian.com/world/americas",
-    "https://www.theguardian.com/world/asia",
-    "https://www.theguardian.com/world/europe-news",
-    "https://www.theguardian.com/world/middleeast",
-    "https://www.npr.org/sections/world/",
 ]
 
 
 # Direct public section pages. These are scraped for image URLs because several
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
-    # AP politics/world/top news. No sports, religion, entertainment,
-    # business, tech, or generic photo-gallery hubs.
+    # AP is favored because it tends to supply more event/scene photos than BBC cards.
+    # Removed AP business / entertainment / technology / health / science hubs because
+    # they often add generic portraits, product shots, conference panels, and crops.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
+    "https://apnews.com/sports",
     "https://apnews.com/climate-and-environment",
+    "https://apnews.com/religion",
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
     "https://apnews.com/hub/politics",
+    "https://apnews.com/hub/sports",
+    "https://apnews.com/hub/photography",
+    "https://apnews.com/hub/photos",
+    "https://apnews.com/hub/photo-gallery",
+    "https://apnews.com/hub/ap-photos",
     "https://apnews.com/hub/europe",
     "https://apnews.com/hub/asia-pacific",
     "https://apnews.com/hub/africa",
@@ -116,45 +81,15 @@ DIRECT_IMAGE_PAGES = [
     "https://apnews.com/hub/ukraine",
     "https://apnews.com/hub/israel-hamas-war",
 
-    # Extra AP regional/conflict hubs.
-    "https://apnews.com/hub/united-nations",
-    "https://apnews.com/hub/china",
-    "https://apnews.com/hub/india",
-    "https://apnews.com/hub/north-korea",
-    "https://apnews.com/hub/south-korea",
-    "https://apnews.com/hub/taiwan",
-    "https://apnews.com/hub/iran",
-    "https://apnews.com/hub/syria",
-    "https://apnews.com/hub/yemen",
-    "https://apnews.com/hub/venezuela",
-    "https://apnews.com/hub/mexico",
-    "https://apnews.com/hub/brazil",
-
-    # Reuters world/news pages.
+    # Reuters public pages can be inconsistent, but these are attempted briefly.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
     "https://www.reuters.com/pictures/",
 
-    # Guardian/NPR world/news fallbacks.
+    # Extra public pages that usually expose straightforward image URLs.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
     "https://www.npr.org/sections/news/",
-
-    # Extra regional pages for broader geography.
-    "https://www.reuters.com/world/africa/",
-    "https://www.reuters.com/world/americas/",
-    "https://www.reuters.com/world/asia-pacific/",
-    "https://www.reuters.com/world/china/",
-    "https://www.reuters.com/world/europe/",
-    "https://www.reuters.com/world/india/",
-    "https://www.reuters.com/world/middle-east/",
-    "https://www.reuters.com/world/uk/",
-    "https://www.theguardian.com/world/africa",
-    "https://www.theguardian.com/world/americas",
-    "https://www.theguardian.com/world/asia",
-    "https://www.theguardian.com/world/europe-news",
-    "https://www.theguardian.com/world/middleeast",
-    "https://www.npr.org/sections/world/",
 ]
 
 HEADERS = {
@@ -175,8 +110,8 @@ PROXY_CACHE_MAX_ITEMS = 420
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
 
-MIN_IMAGE_WIDTH = 720
-MIN_IMAGE_HEIGHT = 420
+MIN_IMAGE_WIDTH = 760
+MIN_IMAGE_HEIGHT = 430
 
 KNOWN_BAD_URL_FRAGMENTS = [
     "p0l7jnbt", "p0kxxp17", "p0n9y769", "3a08bc10", "b9785300",
@@ -205,35 +140,6 @@ def url_is_vertical_only(url):
 
 def url_needs_voice_crop(url):
     return any(fragment in url for fragment in VOICE_CROP_URL_FRAGMENTS)
-
-
-POLITICAL_OR_SCENE_LINK_KEYWORDS = [
-    "politics", "election", "congress", "senate", "supreme-court",
-    "white-house", "trump", "biden", "government", "protest",
-    "war", "ukraine", "russia", "israel", "gaza", "hamas",
-    "immigration", "border", "climate", "disaster", "world",
-    "europe", "asia", "asia-pacific", "africa", "latin-america",
-    "middle-east", "americas", "china", "india", "taiwan",
-    "north-korea", "south-korea", "iran", "syria", "yemen",
-    "venezuela", "mexico", "brazil", "united-nations",
-    "us-news", "ap-top-news", "police", "court", "strike",
-]
-
-REJECT_TOPIC_LINK_KEYWORDS = [
-    "entertainment", "celebrity", "movies", "music", "sports",
-    "business", "technology", "science", "health", "lifestyle",
-    "travel", "food", "fashion", "review", "television", "tv",
-]
-
-
-def link_is_relevant_news_scene(link):
-    lower = (link or "").lower()
-    if any(skip in lower for skip in REJECT_TOPIC_LINK_KEYWORDS):
-        return False
-    # Reuters/AP home pages can have short paths; allow them through.
-    if lower.rstrip("/") in ["https://apnews.com", "https://www.reuters.com"]:
-        return True
-    return any(token in lower for token in POLITICAL_OR_SCENE_LINK_KEYWORDS)
 
 
 def url_is_disallowed_graphic_asset(url):
@@ -366,19 +272,11 @@ def extract_article_links_from_html(html, base_url, max_links=40):
         if any(domain in lower for domain in ["apnews.com", "reuters.com"]):
             if len(lower.rstrip('/').split('/')) < 4:
                 continue
-        if not link_is_relevant_news_scene(link):
-            continue
         seen.add(link)
         links.append(link)
         if len(links) >= max_links:
             break
-
-    # Put politics/world/conflict/disaster links first, but keep variety inside that set.
-    priority = [l for l in links if any(k in l.lower() for k in POLITICAL_OR_SCENE_LINK_KEYWORDS)]
-    fallback = [l for l in links if l not in priority]
-    random.shuffle(priority)
-    random.shuffle(fallback)
-    return (priority + fallback)[:max_links]
+    return links
 
 
 def extract_inline_images_from_html(html, base_url, max_images=35):
@@ -1127,8 +1025,7 @@ let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
 let badSrcs = new Set();
-const RECENT_LIMIT = 55;
-const LOAD_TIMEOUT_MS = 2500;
+const RECENT_LIMIT = 40;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -1144,24 +1041,10 @@ function shuffleArray(arr) {{ const a=arr.slice(); for(let i=a.length-1;i>0;i--)
 function isVerticalPhone() {{ return window.matchMedia("(pointer: coarse)").matches && window.innerHeight > window.innerWidth; }}
 function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly && !isVerticalPhone()); }}
 function refillPool() {{
-  let baseCandidates = slides
+  let candidates = slides
     .filter(slideAllowedForCurrentOrientation)
-    .map(s => s.src);
-
-  let candidates = baseCandidates.filter(src => !badSrcs.has(src));
-
-  // If temporary proxy/network failures collapsed the usable pool, recover.
-  // This prevents the page from getting trapped on 3-4 working images.
-  if (candidates.length < 18 && badSrcs.size > 0 && baseCandidates.length > candidates.length) {{
-    console.log("rotation collapsed; clearing session bad list", {{
-      totalSlides: slides.length,
-      base: baseCandidates.length,
-      usable: candidates.length,
-      bad: badSrcs.size
-    }});
-    badSrcs.clear();
-    candidates = baseCandidates.slice();
-  }}
+    .map(s => s.src)
+    .filter(src => !badSrcs.has(src));
 
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
 
@@ -1169,7 +1052,7 @@ function refillPool() {{
 
   // If the surviving pool is smaller than recent memory, relax recent memory
   // instead of forcing the page to repeat one tiny subset forever.
-  if (fresh.length < Math.min(8, candidates.length)) fresh = candidates;
+  if (fresh.length < Math.min(12, candidates.length)) fresh = candidates;
 
   shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
@@ -1219,15 +1102,14 @@ function prepareAndDraw(img, src) {{
   el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
 }}
 function loadRandomSlide(attempts=0) {{
-  if (isLoadingSlide) return;
+  // Do not let one slow request freeze the whole rotation.
+  if (isLoadingSlide && attempts === 0) return;
   isLoadingSlide = true;
   resizeCanvas();
 
-  if (!slides.length || attempts > 160) {{
-    // If the session marked almost everything bad, clear the session-only list
-    // once so a temporary network failure doesn't trap the site on 3 images.
-    if (badSrcs.size > Math.max(20, slides.length * 0.65)) {{
-      console.log("clearing session bad list after too many failed attempts", badSrcs.size);
+  if (!slides.length || attempts > 90) {{
+    if (badSrcs.size > 0) {{
+      console.log("resetting badSrcs after too many failed attempts", badSrcs.size);
       badSrcs.clear();
       refillPool();
     }}
@@ -1238,43 +1120,42 @@ function loadRandomSlide(attempts=0) {{
   const src = getNextRandomSrc();
   if (!src) {{
     isLoadingSlide = false;
+    setTimeout(() => {{ refillPool(); loadRandomSlide(attempts + 1); }}, 80);
     return;
   }}
 
   const loader = new Image();
   loader.decoding = "async";
-  let finished = false;
 
-  function failFast(reason) {{
+  let finished = false;
+  const finish = (worked) => {{
     if (finished) return;
     finished = true;
-    badSrcs.add(src);
-    shuffledPool = shuffledPool.filter(s => s !== src);
+    clearTimeout(loadTimer);
     isLoadingSlide = false;
-    console.log("skip slow/bad image", reason, src);
-    setTimeout(() => loadRandomSlide(attempts + 1), 20);
-  }}
+    if (!worked) {{
+      badSrcs.add(src);
+      shuffledPool = shuffledPool.filter(s => s !== src);
+      setTimeout(() => loadRandomSlide(attempts + 1), 35);
+    }}
+  }};
 
-  const loadTimer = setTimeout(() => failFast("timeout"), LOAD_TIMEOUT_MS);
+  const loadTimer = setTimeout(() => {{
+    console.log("image load timeout", src);
+    finish(false);
+  }}, 2400);
 
   loader.onload = () => {{
-    if (finished) return;
-    clearTimeout(loadTimer);
-
-    // Do not delete from slides. Mark unusable for this session only.
     if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{
-      failFast("vertical desktop");
+      finish(false);
       return;
     }}
-
-    finished = true;
     prepareAndDraw(loader, src);
-    isLoadingSlide = false;
+    finish(true);
   }};
 
   loader.onerror = () => {{
-    clearTimeout(loadTimer);
-    failFast("error");
+    finish(false);
   }};
 
   loader.src = src;
@@ -1407,8 +1288,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 if image_is_portrait_or_generic_isolated_subject(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT portrait/generic isolated subject]", url)
-                    self.safe_send_bytes(415, b"Rejected portrait/generic isolated subject", extra_headers={"Cache-Control": "no-store"})
+                    print("[REJECT portrait/generic isolated]", url)
+                    self.safe_send_bytes(415, b"Rejected portrait or generic isolated subject", extra_headers={"Cache-Control": "no-store"})
                     return
                 if image_has_center_divider(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
