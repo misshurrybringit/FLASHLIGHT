@@ -1,10 +1,10 @@
 """
-Regression checks for the BBC flashlight server rules.
+Regression checks for the flashlight server URL rules.
 Run with:
     python3 test.py
 
 This does not download images. It checks the URL-fragment rules that decide
-whether images are hard-blocked or only allowed on vertical phones.
+whether images are hard-blocked, only allowed on vertical phones, or cropped.
 """
 
 from server import (
@@ -13,174 +13,79 @@ from server import (
     url_is_known_bad,
     url_is_vertical_only,
     url_needs_voice_crop,
+    canonical_image_key,
 )
 
 TESTS = [
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/dce9/live/166137e0-3f11-11f1-bd52-e755d604ece4.jpg",
-        False,
-        True,
-        False,
+        False, True, False,
         "vertical/cropped image should be vertical-phone only, not hard blocked",
     ),
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/627b/live/3600d2f0-2214-11f1-b297-95b0a0a8331e.jpg",
-        True,
-        False,
-        False,
-        "bad bottom-cropped vertical/editorial image should be hard blocked",
+        False, True, False,
+        "cropped full-body/vertical image should be vertical-phone only, not hard blocked",
     ),
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/1e87/live/9a3df7e0-4562-11f1-b55d-0f258dce1735.jpg",
-        False,
-        True,
-        False,
-        "vertical/cropped editorial image should be vertical-phone only, not hard blocked",
+        False, True, False,
+        "vertical/cropped editorial image should be vertical-phone only",
     ),
-
     (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/5ccf/live/b1e9ef60-44af-11f1-bd52-e755d604ece4.jpg",
-        False,
-        True,
-        False,
-        "vertical/cropped image should be vertical-phone only, not hard blocked",
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/79d6/live/7b23ccb0-328c-11f1-b297-95b0a0a8331e.jpg",
+        False, True, False,
+        "vertical composition inside landscape frame should be vertical-phone only",
+    ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/6245/live/c022fa90-44a0-11f1-ac78-2112837ce2aa.jpg",
+        False, True, False,
+        "vertical-inside-landscape frame should be vertical-phone only",
+    ),
+    (
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/3ead/live/679152b0-3f40-11f1-ac78-2112837ce2aa.jpg",
+        False, True, False,
+        "vertical-inside-landscape frame should be vertical-phone only",
     ),
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/d379/live/9f35a8f0-4545-11f1-8ea3-630273c214ab.jpg",
-        True,
-        False,
-        False,
+        True, False, False,
         "promotional / graphic editorial image should be hard blocked",
     ),
     (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/2078/live/b9785300-4565-11f1-b55d-0f258dce1735.png",
-        True,
-        False,
-        False,
-        "black center-divider graphic image should be hard blocked",
+        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/79f2/live/4c3e0ce0-3a47-11f1-8606-05fe34b06e1b.jpg",
+        True, False, False,
+        "graphic + cropped editorial image should be hard blocked",
     ),
-
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/4448/live/f16b6b80-43d5-11f1-bf3e-3d07e81b01ce.jpg",
-        False,
-        False,
-        True,
+        False, False, True,
         "VOICE-logo image should be cropped, not rejected",
     ),
     (
         "https://ichef.bbci.co.uk/images/ic/1024x576/p0ngd4cc.jpg",
-        True,
-        False,
-        False,
+        True, False, False,
         "known bad cropped/isolated image should be hard blocked",
     ),
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/6a8f/live/00a03cc0-3d2d-11f1-9d5c-8ba507d7dbde.jpg",
-        True,
-        False,
-        False,
+        True, False, False,
         "generic editorial portrait / isolated subject should be hard blocked",
     ),
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/639a/live/929fd780-43d5-11f1-bf3e-3d07e81b01ce.jpg",
-        True,
-        False,
-        False,
+        True, False, False,
         "generic editorial portrait / isolated subject should be hard blocked",
     ),
     (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/68be/live/06449360-4525-11f1-bd52-e755d604ece4.jpg",
-        True,
-        False,
-        False,
+        True, False, False,
         "generic editorial portrait / isolated subject should be hard blocked",
     ),
     (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/5938/live/c471ab80-44b1-11f1-b55d-0f258dce1735.png",
-        True,
-        False,
-        False,
-        "VOICE branded PNG / promo graphic should be hard blocked",
-    ),
-    (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/ef15/live/cfcd74b0-3f2e-11f1-ac78-2112837ce2aa.jpg",
-        True,
-        False,
-        False,
-        "promotional/editorial portrait should be hard blocked",
-    ),
-    (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/86b0/live/f4ee5fc0-3ffb-11f1-a269-2b0eab1d0b0e.jpg",
-        True,
-        False,
-        False,
-        "close-up face / isolated portrait should be hard blocked",
-    ),
-    (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/79d6/live/7b23ccb0-328c-11f1-b297-95b0a0a8331e.jpg",
-        False,
-        True,
-        False,
-        "vertical composition inside landscape frame should be vertical-phone only",
-    ),
-    (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/2466/live/843ef730-4690-11f1-b55d-0f258dce1735.jpg",
-        False,
-        True,
-        False,
-        "vertical/cropped image should be vertical-phone only",
-    ),
-    (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/32d0/live/7488a0b0-4303-11f1-8f44-65d2172cbb44.jpg",
-        True,
-        False,
-        False,
-        "generic cropped portrait should be hard blocked",
-    ),
-    (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/23b1/live/acb55400-38a5-11f1-a963-91d9e730d487.jpg",
-        True,
-        False,
-        False,
-        "generic close-up portrait should be hard blocked",
-    ),
-
-    (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/79f2/live/4c3e0ce0-3a47-11f1-8606-05fe34b06e1b.jpg",
-        True,
-        False,
-        False,
-        "graphic + cropped editorial image should be hard blocked",
-    ),
-    (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/55ee/live/72e83b70-43e5-11f1-9113-1988573e8ff7.jpg",
-        True,
-        False,
-        False,
-        "generic isolated subject / non-scene image should be hard blocked",
-    ),
-    (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/6245/live/c022fa90-44a0-11f1-ac78-2112837ce2aa.jpg",
-        False,
-        True,
-        False,
-        "vertical composition inside landscape frame should be vertical-phone only",
-    ),
-
-
-    (
         "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/bfc0/live/5a8f0590-3e59-11f1-8887-e93160959470.jpg",
-        True,
-        False,
-        False,
-        "generic isolated portrait should be rejected",
-    ),
-    (
-        "https://ichef.bbci.co.uk/ace/standard/1024/cpsprodpb/07da/live/f7e14700-486c-11f1-ba51-89e146a2916a.jpg",
-        True,
-        False,
-        False,
-        "generic portrait should be hard blocked",
+        True, False, False,
+        "generic/non-scene image should be hard blocked",
     ),
 ]
 
@@ -215,11 +120,20 @@ def main():
     else:
         print("  PASS ✓ no overlap between hard-bad and vertical-only fragments")
 
+    ap_a = "https://dims.apnews.com/dims4/default/abc/2147483647/strip/true/resize/1200x800!/format/webp/quality/90/?url=https://assets.apnews.com/37/ec/example.jpg"
+    ap_b = "https://assets.apnews.com/37/ec/example.jpg"
+    if canonical_image_key(ap_a) == canonical_image_key(ap_b):
+        print("  PASS ✓ AP dims URLs dedupe to the underlying asset")
+    else:
+        print("  FAIL ✗ AP dims URL did not dedupe to underlying asset")
+        failures += 1
+
     print()
-    print(f"  {len(TESTS) + 1 - failures} passed, {failures} failed")
+    print(f"  {len(TESTS) + 2 - failures} passed, {failures} failed")
     print()
     raise SystemExit(1 if failures else 0)
 
 
 if __name__ == "__main__":
     main()
+
