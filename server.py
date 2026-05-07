@@ -56,9 +56,39 @@ SOURCE_PAGES = [
     "https://apnews.com/hub/natural-disasters",
     "https://apnews.com/hub/ukraine",
     "https://apnews.com/hub/israel-hamas-war",
+
+    # Extra AP regional/conflict hubs.
+    "https://apnews.com/hub/united-nations",
+    "https://apnews.com/hub/china",
+    "https://apnews.com/hub/india",
+    "https://apnews.com/hub/north-korea",
+    "https://apnews.com/hub/south-korea",
+    "https://apnews.com/hub/taiwan",
+    "https://apnews.com/hub/iran",
+    "https://apnews.com/hub/syria",
+    "https://apnews.com/hub/yemen",
+    "https://apnews.com/hub/venezuela",
+    "https://apnews.com/hub/mexico",
+    "https://apnews.com/hub/brazil",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
     "https://www.reuters.com/pictures/",
+
+    # Extra regional Reuters/Guardian/NPR pages for broader geography.
+    "https://www.reuters.com/world/africa/",
+    "https://www.reuters.com/world/americas/",
+    "https://www.reuters.com/world/asia-pacific/",
+    "https://www.reuters.com/world/china/",
+    "https://www.reuters.com/world/europe/",
+    "https://www.reuters.com/world/india/",
+    "https://www.reuters.com/world/middle-east/",
+    "https://www.reuters.com/world/uk/",
+    "https://www.theguardian.com/world/africa",
+    "https://www.theguardian.com/world/americas",
+    "https://www.theguardian.com/world/asia",
+    "https://www.theguardian.com/world/europe-news",
+    "https://www.theguardian.com/world/middleeast",
+    "https://www.npr.org/sections/world/",
 ]
 
 
@@ -86,6 +116,20 @@ DIRECT_IMAGE_PAGES = [
     "https://apnews.com/hub/ukraine",
     "https://apnews.com/hub/israel-hamas-war",
 
+    # Extra AP regional/conflict hubs.
+    "https://apnews.com/hub/united-nations",
+    "https://apnews.com/hub/china",
+    "https://apnews.com/hub/india",
+    "https://apnews.com/hub/north-korea",
+    "https://apnews.com/hub/south-korea",
+    "https://apnews.com/hub/taiwan",
+    "https://apnews.com/hub/iran",
+    "https://apnews.com/hub/syria",
+    "https://apnews.com/hub/yemen",
+    "https://apnews.com/hub/venezuela",
+    "https://apnews.com/hub/mexico",
+    "https://apnews.com/hub/brazil",
+
     # Reuters world/news pages.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
@@ -95,6 +139,22 @@ DIRECT_IMAGE_PAGES = [
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
     "https://www.npr.org/sections/news/",
+
+    # Extra regional pages for broader geography.
+    "https://www.reuters.com/world/africa/",
+    "https://www.reuters.com/world/americas/",
+    "https://www.reuters.com/world/asia-pacific/",
+    "https://www.reuters.com/world/china/",
+    "https://www.reuters.com/world/europe/",
+    "https://www.reuters.com/world/india/",
+    "https://www.reuters.com/world/middle-east/",
+    "https://www.reuters.com/world/uk/",
+    "https://www.theguardian.com/world/africa",
+    "https://www.theguardian.com/world/americas",
+    "https://www.theguardian.com/world/asia",
+    "https://www.theguardian.com/world/europe-news",
+    "https://www.theguardian.com/world/middleeast",
+    "https://www.npr.org/sections/world/",
 ]
 
 HEADERS = {
@@ -152,7 +212,10 @@ POLITICAL_OR_SCENE_LINK_KEYWORDS = [
     "white-house", "trump", "biden", "government", "protest",
     "war", "ukraine", "russia", "israel", "gaza", "hamas",
     "immigration", "border", "climate", "disaster", "world",
-    "europe", "asia", "africa", "latin-america", "middle-east",
+    "europe", "asia", "asia-pacific", "africa", "latin-america",
+    "middle-east", "americas", "china", "india", "taiwan",
+    "north-korea", "south-korea", "iran", "syria", "yemen",
+    "venezuela", "mexico", "brazil", "united-nations",
     "us-news", "ap-top-news", "police", "court", "strike",
 ]
 
@@ -1064,7 +1127,8 @@ let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
 let badSrcs = new Set();
-const RECENT_LIMIT = 40;
+const RECENT_LIMIT = 55;
+const LOAD_TIMEOUT_MS = 2500;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -1179,26 +1243,38 @@ function loadRandomSlide(attempts=0) {{
 
   const loader = new Image();
   loader.decoding = "async";
+  let finished = false;
+
+  function failFast(reason) {{
+    if (finished) return;
+    finished = true;
+    badSrcs.add(src);
+    shuffledPool = shuffledPool.filter(s => s !== src);
+    isLoadingSlide = false;
+    console.log("skip slow/bad image", reason, src);
+    setTimeout(() => loadRandomSlide(attempts + 1), 20);
+  }}
+
+  const loadTimer = setTimeout(() => failFast("timeout"), LOAD_TIMEOUT_MS);
 
   loader.onload = () => {{
+    if (finished) return;
+    clearTimeout(loadTimer);
+
     // Do not delete from slides. Mark unusable for this session only.
     if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{
-      badSrcs.add(src);
-      shuffledPool = shuffledPool.filter(s => s !== src);
-      isLoadingSlide = false;
-      setTimeout(() => loadRandomSlide(attempts + 1), 30);
+      failFast("vertical desktop");
       return;
     }}
 
+    finished = true;
     prepareAndDraw(loader, src);
     isLoadingSlide = false;
   }};
 
   loader.onerror = () => {{
-    badSrcs.add(src);
-    shuffledPool = shuffledPool.filter(s => s !== src);
-    isLoadingSlide = false;
-    setTimeout(() => loadRandomSlide(attempts + 1), 30);
+    clearTimeout(loadTimer);
+    failFast("error");
   }};
 
   loader.src = src;
@@ -1208,7 +1284,7 @@ canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
-resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide(); setInterval(loadRandomSlide, 5000);
+resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide(); setInterval(loadRandomSlide, 2800);
 </script>
 </body>
 </html>'''
