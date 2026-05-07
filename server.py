@@ -24,12 +24,7 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
     "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
     "https://feeds.bbci.co.uk/news/uk/rss.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
-    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
-    "https://feeds.bbci.co.uk/news/health/rss.xml",
     "https://feeds.apnews.com/rss/apf-topnews",
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
@@ -41,8 +36,6 @@ SOURCE_PAGES = [
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
     "https://www.reuters.com/business/",
@@ -59,21 +52,19 @@ DIRECT_IMAGE_PAGES = [
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
-    "https://apnews.com/sports",
     "https://apnews.com/science",
-    "https://apnews.com/health",
     "https://apnews.com/climate-and-environment",
-    "https://apnews.com/religion",
-    "https://apnews.com/technology",
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
     "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/business",
-    "https://apnews.com/hub/sports",
-    "https://apnews.com/hub/entertainment",
+    "https://apnews.com/hub/middle-east",
+    "https://apnews.com/hub/europe",
+    "https://apnews.com/hub/latin-america",
+    "https://apnews.com/hub/africa",
+    "https://apnews.com/hub/asia-pacific",
+    "https://apnews.com/hub/russia-ukraine",
+    "https://apnews.com/hub/israel-hamas-war",
     "https://apnews.com/hub/science",
 
     # Reuters public pages can be inconsistent, but these are attempted briefly.
@@ -94,14 +85,14 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 MAX_IMAGE_POOL = 1400
 SEQUENCE_LENGTH = 1100
 IMAGE_CACHE = {"time": 0, "images": []}
-CACHE_SECONDS = 180
+CACHE_SECONDS = 90
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
 PROXY_CACHE_MAX_ITEMS = 900
 
 REJECT_CACHE = {}
-REJECT_CACHE_SECONDS = 1800
+REJECT_CACHE_SECONDS = 900
 
 MIN_IMAGE_WIDTH = 760
 MIN_IMAGE_HEIGHT = 430
@@ -113,6 +104,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "00a03cc0", "929fd780", "06449360", "f4ee5fc0",
     "cfcd74b0", "7488a0b0", "72e83b70", "acb55400",
     "5a8f0590",
+    "typeshift.svg", "pileup.svg", "memoku.svg",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -158,6 +150,10 @@ def clean_extracted_image_url(url):
         return None
     lower = url.lower()
     if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
+        return None
+    if lower.endswith(".svg") or ".svg?" in lower:
+        return None
+    if "apnews" in lower and ".png" in lower:
         return None
     return upgrade_bbc_image_url(url)
 
@@ -394,7 +390,7 @@ def extract_image_urls_from_html(html, base_url, limit=80):
     return found[:limit]
 
 
-def get_direct_page_images(limit=360):
+def get_direct_page_images(limit=520):
     images = []
     seen = set()
     pages = DIRECT_IMAGE_PAGES[:]
@@ -407,8 +403,8 @@ def get_direct_page_images(limit=360):
     pages = ap_pages + other_pages
 
     start_time = time.time()
-    page_budget_seconds = 8.0
-    article_scrape_budget = 70
+    page_budget_seconds = 12.0
+    article_scrape_budget = 130
     article_scrapes = 0
 
     def add_candidate(img):
@@ -493,8 +489,8 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     images = []
     seen = set()
     start_time = time.time()
-    time_budget_seconds = 9.0
-    non_bbc_article_scrape_budget = 24
+    time_budget_seconds = 16.0
+    non_bbc_article_scrape_budget = 90
     non_bbc_article_scrapes = 0
 
     def add_image(img):
@@ -513,8 +509,11 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         images.append(img)
         return True
 
-    feeds = RSS_FEEDS[:]
-    random.shuffle(feeds)
+    bbc_feeds = [f for f in RSS_FEEDS if is_bbc_feed_url(f)]
+    non_bbc_feeds = [f for f in RSS_FEEDS if not is_bbc_feed_url(f)]
+    random.shuffle(non_bbc_feeds)
+    random.shuffle(bbc_feeds)
+    feeds = non_bbc_feeds + bbc_feeds
     for feed_url in feeds:
         if len(images) >= limit:
             break
@@ -541,7 +540,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             continue
 
     # Add a first pass from direct section pages, with AP favored.
-    for img in get_direct_page_images(limit=360):
+    for img in get_direct_page_images(limit=520):
         if len(images) >= limit:
             break
         add_image(img)
@@ -549,7 +548,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     pages = SOURCE_PAGES[:]
     random.shuffle(pages)
     page_article_scrapes = 0
-    page_article_scrape_budget = 46
+    page_article_scrape_budget = 90
     for page_url in pages:
         if len(images) >= limit:
             break
@@ -569,6 +568,16 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         except Exception:
             continue
 
+    # Keep a broad mix: AP first, then BBC regional/world, then Reuters/Guardian/NPR.
+    ap = [i for i in images if "apnews.com" in i or "assets.apnews.com" in i or "dims.apnews.com" in i]
+    bbc = [i for i in images if "bbci.co.uk" in i]
+    reuters = [i for i in images if "reuters" in i]
+    guardian = [i for i in images if "guim.co.uk" in i or "theguardian" in i]
+    npr = [i for i in images if "npr" in i or "brightspotcdn" in i]
+    other = [i for i in images if i not in ap and i not in bbc and i not in reuters and i not in guardian and i not in npr]
+    for group in (ap, bbc, reuters, guardian, npr, other):
+        random.shuffle(group)
+    images = ap[:420] + bbc[:360] + reuters[:160] + guardian[:120] + npr[:80] + other[:80]
     random.shuffle(images)
     IMAGE_CACHE["time"] = now
     IMAGE_CACHE["images"] = images[:]
@@ -885,7 +894,14 @@ let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
 let badSrcs = new Set();
-const RECENT_LIMIT = 35;
+let readySlides = [];
+let readySrcs = new Set();
+let preloadInFlight = 0;
+const RECENT_LIMIT = 55;
+const MIN_READY = 28;
+const MAX_READY = 44;
+const PRELOAD_CONCURRENCY = 5;
+const IMAGE_TIMEOUT_MS = 4200;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -904,15 +920,69 @@ function refillPool() {{
   let candidates = slides
     .filter(slideAllowedForCurrentOrientation)
     .map(s => s.src)
-    .filter(src => !badSrcs.has(src));
+    .filter(src => !badSrcs.has(src))
+    .filter(src => !readySrcs.has(src));
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
   let fresh = candidates.filter(src => !recentlyShown.includes(src));
-  if (fresh.length < Math.min(12, candidates.length)) fresh = candidates;
+  if (fresh.length < Math.min(20, candidates.length)) fresh = candidates;
   shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
-  console.log("rotation pool", {{ total: slides.length, usable: candidates.length, fresh: fresh.length, bad: badSrcs.size }});
+  console.log("rotation pool", {{ total: slides.length, usable: candidates.length, ready: readySlides.length, bad: badSrcs.size }});
 }}
-function getNextRandomSrc() {{ if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool(); if (!shuffledPool.length) return null; return shuffledPool[poolIndex++]; }}
+function getNextCandidateSrc() {{
+  if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool();
+  if (!shuffledPool.length) return null;
+  return shuffledPool[poolIndex++];
+}}
+function markBad(src) {{
+  badSrcs.add(src);
+  readySrcs.delete(src);
+  readySlides = readySlides.filter(item => item.src !== src);
+  if (badSrcs.size > Math.max(80, slides.length * 0.65)) {{
+    console.warn("clearing badSrcs after too many failures");
+    badSrcs.clear();
+  }}
+}}
+function preloadMore() {{
+  while (preloadInFlight < PRELOAD_CONCURRENCY && readySlides.length + preloadInFlight < MAX_READY) {{
+    const src = getNextCandidateSrc();
+    if (!src) break;
+    if (readySrcs.has(src) || badSrcs.has(src)) continue;
+
+    preloadInFlight++;
+    const loader = new Image();
+    loader.decoding = "async";
+    let done = false;
+    const finish = () => {{
+      if (done) return false;
+      done = true;
+      clearTimeout(timer);
+      preloadInFlight--;
+      setTimeout(preloadMore, 10);
+      return true;
+    }};
+    const timer = setTimeout(() => {{
+      if (!finish()) return;
+      markBad(src);
+    }}, IMAGE_TIMEOUT_MS);
+    loader.onload = () => {{
+      if (!finish()) return;
+      if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{
+        markBad(src);
+        return;
+      }}
+      if (!readySrcs.has(src) && !badSrcs.has(src)) {{
+        readySrcs.add(src);
+        readySlides.push({{ img: loader, src }});
+      }}
+    }};
+    loader.onerror = () => {{
+      if (!finish()) return;
+      markBad(src);
+    }};
+    loader.src = src;
+  }}
+}}
 function makeImage(sourceImage) {{
   const off = document.createElement("canvas"); off.width = canvas.width; off.height = canvas.height;
   const offCtx = off.getContext("2d", {{ willReadFrequently: true }}); syncContextQuality(offCtx);
@@ -945,74 +1015,35 @@ function prepareAndDraw(img, src) {{
   const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
   const el = document.getElementById("debug-url"); el.textContent = rawUrl + "  [shown " + recentlyShown.length + " / total " + slides.length + " / bad " + badSrcs.size + "]"; el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
 }}
-function loadRandomSlide(attempts=0) {{
+function loadRandomSlide() {{
   if (isLoadingSlide) return;
   isLoadingSlide = true;
   resizeCanvas();
 
-  if (!slides.length || attempts > 60) {{
+  preloadMore();
+
+  if (readySlides.length === 0) {{
     isLoadingSlide = false;
-    if (badSrcs.size > slides.length * 0.72) {{
-      console.warn("too many bad images; clearing badSrcs to retry pool");
-      badSrcs.clear();
-      refillPool();
-    }}
+    setTimeout(() => {{ preloadMore(); loadRandomSlide(); }}, 180);
     return;
   }}
 
-  const src = getNextRandomSrc();
-  if (!src) {{
-    isLoadingSlide = false;
-    return;
-  }}
+  // Prefer something not shown recently, but fall back instead of stalling.
+  let idx = readySlides.findIndex(item => !recentlyShown.includes(item.src));
+  if (idx < 0) idx = Math.floor(Math.random() * readySlides.length);
+  const item = readySlides.splice(idx, 1)[0];
+  readySrcs.delete(item.src);
+  prepareAndDraw(item.img, item.src);
+  isLoadingSlide = false;
 
-  const loader = new Image();
-  loader.decoding = "async";
-  let finished = false;
-
-  const finish = () => {{
-    if (finished) return false;
-    finished = true;
-    clearTimeout(timer);
-    isLoadingSlide = false;
-    return true;
-  }};
-
-  const timer = setTimeout(() => {{
-    if (!finish()) return;
-    badSrcs.add(src);
-    shuffledPool = shuffledPool.filter(s => s !== src);
-    setTimeout(() => loadRandomSlide(attempts + 1), 20);
-  }}, 2200);
-
-  loader.onload = () => {{
-    if (!finish()) return;
-
-    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{
-      badSrcs.add(src);
-      shuffledPool = shuffledPool.filter(s => s !== src);
-      setTimeout(() => loadRandomSlide(attempts + 1), 20);
-      return;
-    }}
-
-    prepareAndDraw(loader, src);
-  }};
-
-  loader.onerror = () => {{
-    if (!finish()) return;
-    badSrcs.add(src);
-    shuffledPool = shuffledPool.filter(s => s !== src);
-    setTimeout(() => loadRandomSlide(attempts + 1), 20);
-  }};
-
-  loader.src = src;
+  if (readySlides.length < MIN_READY) preloadMore();
 }}
 function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; drawFlashlight(); }}
 canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
-resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide(); setInterval(loadRandomSlide, 2800);
+resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); preloadMore(); setTimeout(loadRandomSlide, 350); setInterval(loadRandomSlide, 4300);
 </script>
 </body>
 </html>'''
