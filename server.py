@@ -15,22 +15,19 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
+    # Scene-first feeds. Removed BBC business / technology / health /
+    # entertainment / science because they often produce headshots, podiums,
+    # product shots, studio portraits, and generic cropped editorial images.
     "https://feeds.bbci.co.uk/news/rss.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
-    "https://feeds.bbci.co.uk/news/world/australia/rss.xml",
     "https://feeds.bbci.co.uk/news/world/europe/rss.xml",
     "https://feeds.bbci.co.uk/news/world/asia/rss.xml",
     "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
     "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
     "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
     "https://feeds.bbci.co.uk/news/uk/rss.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
-    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
-    "https://feeds.bbci.co.uk/news/health/rss.xml",
     "https://feeds.apnews.com/rss/apf-topnews",
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
@@ -38,16 +35,16 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
+    # AP/Reuters sections that tend to return event scenes instead of generic
+    # tech/business/entertainment portrait cards.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
+    "https://apnews.com/sports",
+    "https://apnews.com/climate-and-environment",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
     "https://www.reuters.com/pictures/",
 ]
 
@@ -56,32 +53,24 @@ SOURCE_PAGES = [
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
     # AP is favored because it tends to supply more event/scene photos than BBC cards.
+    # Removed AP business / entertainment / technology / health / science hubs because
+    # they often add generic portraits, product shots, conference panels, and crops.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
     "https://apnews.com/sports",
-    "https://apnews.com/science",
-    "https://apnews.com/health",
     "https://apnews.com/climate-and-environment",
     "https://apnews.com/religion",
-    "https://apnews.com/technology",
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
     "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/business",
     "https://apnews.com/hub/sports",
-    "https://apnews.com/hub/entertainment",
-    "https://apnews.com/hub/science",
 
     # Reuters public pages can be inconsistent, but these are attempted briefly.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
     "https://www.reuters.com/pictures/",
 
     # Extra public pages that usually expose straightforward image URLs.
@@ -92,14 +81,14 @@ DIRECT_IMAGE_PAGES = [
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-MAX_IMAGE_POOL = 1800
-SEQUENCE_LENGTH = 1600
+MAX_IMAGE_POOL = 1400
+SEQUENCE_LENGTH = 1100
 IMAGE_CACHE = {"time": 0, "images": []}
 CACHE_SECONDS = 60
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 720
+PROXY_CACHE_MAX_ITEMS = 420
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -114,7 +103,6 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "00a03cc0", "929fd780", "06449360", "f4ee5fc0",
     "cfcd74b0", "7488a0b0", "72e83b70", "acb55400",
     "5a8f0590",
-    "typeshift.svg", "pileup.svg", "memoku.svg",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -159,12 +147,6 @@ def clean_extracted_image_url(url):
     if not url.startswith("http"):
         return None
     lower = url.lower()
-    # AP and other news sites use SVG/PNG for graphics, charts, and illustrations.
-    # Keep these out before they ever enter the rotation pool.
-    if lower.endswith(".svg") or ".svg?" in lower:
-        return None
-    if "apnews" in lower and (lower.endswith(".png") or ".png?" in lower):
-        return None
     if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
         return None
     return upgrade_bbc_image_url(url)
@@ -402,7 +384,7 @@ def extract_image_urls_from_html(html, base_url, limit=80):
     return found[:limit]
 
 
-def get_direct_page_images(limit=760):
+def get_direct_page_images(limit=360):
     images = []
     seen = set()
     pages = DIRECT_IMAGE_PAGES[:]
@@ -415,8 +397,8 @@ def get_direct_page_images(limit=760):
     pages = ap_pages + other_pages
 
     start_time = time.time()
-    page_budget_seconds = 11.5
-    article_scrape_budget = 130
+    page_budget_seconds = 8.0
+    article_scrape_budget = 70
     article_scrapes = 0
 
     def add_candidate(img):
@@ -454,7 +436,7 @@ def get_direct_page_images(limit=760):
             links = extract_article_links_from_html(
                 html,
                 page_url,
-                max_links=85 if "apnews.com" in page_url else 32,
+                max_links=55 if "apnews.com" in page_url else 18,
             )
             random.shuffle(links)
             for link in links:
@@ -501,8 +483,8 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     images = []
     seen = set()
     start_time = time.time()
-    time_budget_seconds = 12.0
-    non_bbc_article_scrape_budget = 65
+    time_budget_seconds = 9.0
+    non_bbc_article_scrape_budget = 24
     non_bbc_article_scrapes = 0
 
     def add_image(img):
@@ -875,10 +857,9 @@ def render_html():
 <title>misshurry</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none !important; }}
-* {{ cursor:none !important; }}
-canvas {{ display:block; width:100vw; height:100vh; touch-action:none; cursor:none !important; }}
-#debug-url {{ position:fixed; bottom:8px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,.52); font:11px monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90vw; z-index:50; user-select:none; pointer-events:auto; background:rgba(0,0,0,.28); padding:3px 6px; border-radius:4px; }}
+html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
+canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
+#debug-url {{ position:fixed; bottom:8px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,.52); font:11px monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90vw; z-index:50; cursor:copy; user-select:none; pointer-events:auto; background:rgba(0,0,0,.28); padding:3px 6px; border-radius:4px; }}
 </style>
 </head>
 <body>
@@ -893,8 +874,7 @@ let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
-let badSrcs = new Set();
-const RECENT_LIMIT = 45;
+const RECENT_LIMIT = 80;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -914,19 +894,12 @@ function refillPool() {{
     .filter(slideAllowedForCurrentOrientation)
     .map(s => s.src)
     .filter(src => !badSrcs.has(src));
-
-  // If the fail list gets too large, reset it once so a temporary network hiccup
-  // cannot collapse the slideshow down to a tiny survivor set.
-  if (candidates.length < 18 && badSrcs.size > 0) {{
-    badSrcs.clear();
-    candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
-  }}
-
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
   let fresh = candidates.filter(src => !recentlyShown.includes(src));
-  if (fresh.length < Math.min(12, candidates.length)) fresh = candidates;
+  if (fresh.length < Math.min(8, candidates.length)) fresh = candidates;
   shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
+  console.log("rotation pool", {{ total: slides.length, usable: candidates.length, fresh: fresh.length, bad: badSrcs.size }});
 }}
 function getNextRandomSrc() {{ if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool(); if (!shuffledPool.length) return null; return shuffledPool[poolIndex++]; }}
 function makeImage(sourceImage) {{
@@ -940,42 +913,42 @@ function makeImage(sourceImage) {{
   for(let i=0;i<data.length;i+=4) {{ let gray = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; gray = Math.round(gray/step)*step; data[i]=gray; data[i+1]=gray; data[i+2]=gray; data[i+3]=255; }}
   offCtx.putImageData(imageData,0,0); return off;
 }}
-function drawFallbackMessage() {{
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-}}
+function drawFallbackMessage() {{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height); }}
 function drawFlashlight() {{
   if (!currentPrepared) return;
 
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const radius = Math.sqrt(canvas.width*canvas.width + canvas.height*canvas.height) * (isTouchDevice ? 0.13 : 0.075);
 
-  // One clean frame per animation tick: image, dark veil, then cutout.
-  // This avoids the hard black blink caused by multiple clears/composite passes.
+  // Correct opaque flashlight stack:
+  // 1) solid black cover
+  // 2) punch out the flashlight hole
+  // 3) place the prepared image behind the punched-out cover
+  // This keeps the outside fully opaque while revealing the image only inside the light.
   ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
-
-  ctx.fillStyle = "rgba(0,0,0,0.92)";
+  ctx.fillStyle = "#000";
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
-  cutout.addColorStop(0.00,"rgba(255,255,255,1.00)");
-  cutout.addColorStop(0.24,"rgba(255,255,255,0.92)");
-  cutout.addColorStop(0.54,"rgba(255,255,255,0.38)");
-  cutout.addColorStop(0.82,"rgba(255,255,255,0.14)");
-  cutout.addColorStop(1.00,"rgba(255,255,255,0.00)");
+  cutout.addColorStop(0.00,"rgba(255,248,190,1.00)");
+  cutout.addColorStop(0.20,"rgba(255,238,150,0.84)");
+  cutout.addColorStop(0.50,"rgba(255,220,95,0.46)");
+  cutout.addColorStop(0.82,"rgba(255,200,55,0.18)");
+  cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
 
   ctx.globalCompositeOperation = "destination-out";
   ctx.fillStyle = cutout;
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
+  ctx.globalCompositeOperation = "destination-over";
+  ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
+
   ctx.globalCompositeOperation = "source-over";
   const warm = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius*1.12);
-  warm.addColorStop(0.00,"rgba(255,222,95,0.20)");
-  warm.addColorStop(0.45,"rgba(255,205,60,0.12)");
-  warm.addColorStop(0.90,"rgba(255,185,35,0.035)");
+  warm.addColorStop(0.00,"rgba(255,222,95,0.32)");
+  warm.addColorStop(0.45,"rgba(255,205,60,0.18)");
+  warm.addColorStop(0.85,"rgba(255,185,35,0.065)");
   warm.addColorStop(1.00,"rgba(255,170,20,0.00)");
   ctx.fillStyle = warm;
   ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -984,81 +957,46 @@ function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
   recentlyShown.push(src); if (recentlyShown.length > RECENT_LIMIT) recentlyShown.shift();
   const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
-  const el = document.getElementById("debug-url"); el.textContent = rawUrl; el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
+  const usableEstimate = Math.max(0, slides.length - badSrcs.size);
+  const el = document.getElementById("debug-url"); el.textContent = rawUrl + "  [recent " + recentlyShown.length + " / usable ~" + usableEstimate + " / bad " + badSrcs.size + "]"; el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
 }}
 function loadRandomSlide(attempts=0) {{
-  if (isLoadingSlide) return;
+  if (isLoadingSlide && attempts === 0) return;
   isLoadingSlide = true;
-
-  if (!slides.length || attempts > 120) {{
+  resizeCanvas();
+  if (!slides.length || attempts > 90) {{
+    if (badSrcs.size > Math.max(35, slides.length * 0.45)) {{ badSrcs.clear(); refillPool(); }}
     isLoadingSlide = false;
     return;
   }}
-
   const src = getNextRandomSrc();
-  if (!src) {{
+  if (!src) {{ isLoadingSlide=false; setTimeout(() => {{ refillPool(); loadRandomSlide(attempts+1); }}, 80); return; }}
+  const loader = new Image(); loader.decoding = "async";
+  let finished = false;
+  const finish = (worked, markBad=true) => {{
+    if (finished) return;
+    finished = true;
+    clearTimeout(loadTimer);
     isLoadingSlide = false;
-    refillPool();
-    return;
-  }}
-
-  const loader = new Image();
-  loader.decoding = "async";
-
-  let settled = false;
-  const skipAndTryNext = (markBad = false) => {{
-    if (settled) return;
-    settled = true;
-    if (markBad) {{
-      badSrcs.add(src);
-      shuffledPool = shuffledPool.filter(s => s !== src);
+    if (!worked) {{
+      if (markBad) {{ badSrcs.add(src); shuffledPool = shuffledPool.filter(s => s !== src); }}
+      setTimeout(() => loadRandomSlide(attempts+1), 35);
     }}
-    isLoadingSlide = false;
-    setTimeout(() => loadRandomSlide(attempts + 1), 45);
   }};
-
-  // Some AP/BBC images are just slow; do not permanently remove them on timeout.
-  const timeoutId = setTimeout(() => skipAndTryNext(false), 5200);
-
+  const loadTimer = setTimeout(() => {{ console.log("slow image skipped", src); finish(false, false); }}, 6000);
   loader.onload = () => {{
-    if (settled) return;
-    clearTimeout(timeoutId);
-    settled = true;
-
-    // Do not mutate the master slides array. Mark bad/vertical images and keep moving.
-    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.05) {{
-      skipAndTryNext(true);
-      return;
-    }}
-
-    prepareAndDraw(loader, src);
-    isLoadingSlide = false;
+    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{ finish(false, true); return; }}
+    prepareAndDraw(loader, src); finish(true);
   }};
-
-  loader.onerror = () => skipAndTryNext(true);
+  loader.onerror = () => {{ finish(false, true); }};
   loader.src = src;
 }}
-let rafPending = false;
-function updateFlashlightPositionFromPointer(e) {{
-  const rect = canvas.getBoundingClientRect();
-  const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
-  const offsetY = isTouchDevice ? window.innerHeight * 0.12 : 0;
-  mouseX = (e.clientX - rect.left) * DPR;
-  mouseY = ((e.clientY - rect.top) - offsetY) * DPR;
-  if (!rafPending) {{
-    rafPending = true;
-    requestAnimationFrame(() => {{
-      drawFlashlight();
-      rafPending = false;
-    }});
-  }}
-}}
+function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; drawFlashlight(); }}
 canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
-resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide();
-setTimeout(function rotate() {{
+resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide(); setTimeout(function rotate() {{
   loadRandomSlide();
   setTimeout(rotate, 5000);
 }}, 5000);
@@ -1140,13 +1078,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 data, content_type = fetch_bytes(url, timeout=8)
-                lower_url = url.lower()
-                lower_content_type = content_type.lower()
-                if (lower_url.endswith(".svg") or ".svg?" in lower_url or "svg" in lower_content_type):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT svg graphic]", url)
-                    self.safe_send_bytes(415, b"Rejected svg graphic", extra_headers={"Cache-Control": "no-store"})
-                    return
                 if not content_type.startswith("image/"):
                     REJECT_CACHE[url] = {"time": time.time()}
                     self.safe_send_bytes(415, b"Not an image", extra_headers={"Cache-Control": "no-store"})
@@ -1161,11 +1092,6 @@ class Handler(BaseHTTPRequestHandler):
                             REJECT_CACHE[url] = {"time": time.time()}
                             print("[REJECT low resolution]", url, iw, ih)
                             self.safe_send_bytes(415, b"Rejected low resolution image", extra_headers={"Cache-Control": "no-store"})
-                            return
-                        if ih > iw * 1.05:
-                            REJECT_CACHE[url] = {"time": time.time()}
-                            print("[REJECT vertical image]", url, iw, ih)
-                            self.safe_send_bytes(415, b"Rejected vertical image", extra_headers={"Cache-Control": "no-store"})
                             return
                         if image_is_probably_full_graphic_page(data):
                             REJECT_CACHE[url] = {"time": time.time()}
@@ -1188,10 +1114,11 @@ class Handler(BaseHTTPRequestHandler):
                     print("[REJECT graphic]", url)
                     self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                     return
-                # Keep this filter available for testing, but do not reject every possible
-                # isolated subject at proxy time. It was shrinking the live rotation too much.
-                # Known bad portraits/graphics are still caught by URL, SVG/PNG, divider,
-                # vertical, low-res, and full-graphic rules.
+                if image_is_portrait_or_generic_isolated_subject(test_data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT portrait/generic isolated]", url)
+                    self.safe_send_bytes(415, b"Rejected portrait or generic isolated subject", extra_headers={"Cache-Control": "no-store"})
+                    return
                 if image_has_center_divider(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
                     print("[REJECT divider]", url)
