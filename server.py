@@ -947,36 +947,36 @@ function drawFlashlight() {{
   if (!currentPrepared) return;
 
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
-  const radius = Math.sqrt(canvas.width*canvas.width + canvas.height*canvas.height) * (isTouchDevice ? 0.13 : 0.075);
+  const radius = Math.sqrt(canvas.width*canvas.width + canvas.height*canvas.height) * (isTouchDevice ? 0.115 : 0.065);
 
-  // One clean frame per animation tick: image, dark veil, then cutout.
-  // This avoids the hard black blink caused by multiple clears/composite passes.
+  // Correct draw order:
+  // 1. clear the visible canvas
+  // 2. draw an opaque black veil
+  // 3. punch a soft transparent flashlight hole in that veil
+  // 4. draw the prepared image BEHIND the punched veil
+  // This keeps the outside fully black while revealing the image inside the light.
   ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
 
   ctx.fillStyle = "#000";
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
   cutout.addColorStop(0.00,"rgba(255,255,255,1.00)");
-  cutout.addColorStop(0.24,"rgba(255,255,255,0.92)");
-  cutout.addColorStop(0.54,"rgba(255,255,255,0.38)");
-  cutout.addColorStop(0.82,"rgba(255,255,255,0.14)");
+  cutout.addColorStop(0.22,"rgba(255,255,255,0.96)");
+  cutout.addColorStop(0.46,"rgba(255,255,255,0.58)");
+  cutout.addColorStop(0.64,"rgba(255,255,255,0.08)");
+  cutout.addColorStop(0.72,"rgba(255,255,255,0.00)");
   cutout.addColorStop(1.00,"rgba(255,255,255,0.00)");
 
   ctx.globalCompositeOperation = "destination-out";
   ctx.fillStyle = cutout;
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
+  ctx.globalCompositeOperation = "destination-over";
+  ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
+
   ctx.globalCompositeOperation = "source-over";
-  const warm = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius*1.12);
-  warm.addColorStop(0.00,"rgba(255,222,95,0.20)");
-  warm.addColorStop(0.45,"rgba(255,205,60,0.12)");
-  warm.addColorStop(0.90,"rgba(255,185,35,0.035)");
-  warm.addColorStop(1.00,"rgba(255,170,20,0.00)");
-  ctx.fillStyle = warm;
-  ctx.fillRect(0,0,canvas.width,canvas.height);
 }}
 function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
@@ -1187,14 +1187,15 @@ class Handler(BaseHTTPRequestHandler):
                     print("[REJECT graphic]", url)
                     self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                     return
-                # Keep this filter available for testing, but do not reject every possible
-                # isolated subject at proxy time. It was shrinking the live rotation too much.
-                # Known bad portraits/graphics are still caught by URL, SVG/PNG, divider,
-                # vertical, low-res, and full-graphic rules.
                 if image_has_center_divider(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
                     print("[REJECT divider]", url)
                     self.safe_send_bytes(415, b"Rejected center divider", extra_headers={"Cache-Control": "no-store"})
+                    return
+                if image_is_portrait_or_generic_isolated_subject(test_data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT generic/portrait]", url)
+                    self.safe_send_bytes(415, b"Rejected generic portrait image", extra_headers={"Cache-Control": "no-store"})
                     return
                 print("[SERVE]", url)
                 PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
