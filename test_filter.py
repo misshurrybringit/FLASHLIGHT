@@ -1,4 +1,3 @@
-
 """
 Regression checks for the scene-focused flashlight news-image server.
 Run with:
