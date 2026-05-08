@@ -23,13 +23,7 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
     "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
     "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
-    "https://feeds.bbci.co.uk/news/uk/rss.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
-    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
-    "https://feeds.bbci.co.uk/news/health/rss.xml",
     "https://feeds.apnews.com/rss/apf-topnews",
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
@@ -37,44 +31,18 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
-    "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-
-    "https://apnews.com/hub/ap-top-news",
-    "https://apnews.com/hub/world-news",
-    "https://apnews.com/hub/us-news",
-    "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/europe",
-    "https://apnews.com/hub/asia-pacific",
-    "https://apnews.com/hub/africa",
-    "https://apnews.com/hub/latin-america",
-    "https://apnews.com/hub/middle-east",
-    "https://apnews.com/hub/israel-hamas-war",
-    "https://apnews.com/hub/russia-ukraine",
-    "https://apnews.com/hub/migration",
-    "https://apnews.com/hub/united-nations",
-    "https://apnews.com/hub/elections",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
     "https://www.reuters.com/pictures/",
 ]
 
-
-# Direct public section pages. These are scraped for image URLs because several
-# non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
-    # AP is favored because it tends to supply more event/scene photos than BBC cards.
-    "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
@@ -84,38 +52,21 @@ DIRECT_IMAGE_PAGES = [
     "https://apnews.com/hub/africa",
     "https://apnews.com/hub/latin-america",
     "https://apnews.com/hub/middle-east",
+    "https://apnews.com/hub/immigration",
+    "https://apnews.com/hub/natural-disasters",
+    "https://apnews.com/hub/ukraine",
     "https://apnews.com/hub/israel-hamas-war",
-    "https://apnews.com/hub/russia-ukraine",
-    "https://apnews.com/hub/migration",
-    "https://apnews.com/hub/united-nations",
-    "https://apnews.com/hub/elections",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
-    "https://apnews.com/sports",
-    "https://apnews.com/science",
-    "https://apnews.com/health",
-    "https://apnews.com/climate-and-environment",
-    "https://apnews.com/religion",
-    "https://apnews.com/technology",
-    "https://apnews.com/hub/ap-top-news",
-    "https://apnews.com/hub/world-news",
-    "https://apnews.com/hub/us-news",
-    "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/business",
-    "https://apnews.com/hub/sports",
-    "https://apnews.com/hub/entertainment",
-    "https://apnews.com/hub/science",
-
-    # Reuters public pages can be inconsistent, but these are attempted briefly.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
+    "https://www.reuters.com/world/europe/",
+    "https://www.reuters.com/world/asia-pacific/",
+    "https://www.reuters.com/world/middle-east/",
+    "https://www.reuters.com/world/africa/",
+    "https://www.reuters.com/world/americas/",
     "https://www.reuters.com/pictures/",
-
-    # Extra public pages that usually expose straightforward image URLs.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
+    "https://www.bbc.com/news/world",
     "https://www.npr.org/sections/news/",
 ]
 
@@ -142,7 +93,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "c5a74450", "f53b6250", "p0ngd4cc",
     "00a03cc0", "929fd780", "06449360", "f4ee5fc0",
     "cfcd74b0", "7488a0b0", "72e83b70", "acb55400",
-    "5a8f0590",
+    "5a8f0590", "f055ab30", "f0ccbee0",
+    "typeshift.svg", "pileup.svg", "memoku.svg",
+    "bae9d7794692aee65c34b848aae2", "strait-of-hormuz-3x2-v2",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -154,7 +107,8 @@ VOICE_CROP_URL_FRAGMENTS = ["f16b6b80"]
 
 
 def url_is_known_bad(url):
-    return any(fragment in url for fragment in KNOWN_BAD_URL_FRAGMENTS)
+    lower = (url or "").lower()
+    return any(fragment.lower() in lower for fragment in KNOWN_BAD_URL_FRAGMENTS)
 
 
 def url_is_vertical_only(url):
@@ -163,65 +117,6 @@ def url_is_vertical_only(url):
 
 def url_needs_voice_crop(url):
     return any(fragment in url for fragment in VOICE_CROP_URL_FRAGMENTS)
-
-
-def url_is_disallowed_graphic_asset(url):
-    if not url:
-        return False
-    lower = url.lower()
-    if lower.endswith(".svg") or ".svg?" in lower:
-        return True
-    if "apnews" in lower and (lower.endswith(".png") or ".png?" in lower):
-        return True
-    if any(fragment in lower for fragment in ["typeshift.svg", "pileup.svg", "memoku.svg"]):
-        return True
-    return False
-
-
-def source_category(url):
-    lower = (url or "").lower()
-    if "apnews.com" in lower or "assets.apnews.com" in lower or "dims.apnews.com" in lower:
-        return "ap"
-    if "reuters" in lower:
-        return "reuters"
-    if "bbci.co.uk" in lower or "bbc.co.uk" in lower or "bbc.com" in lower:
-        return "bbc"
-    if "guim.co.uk" in lower or "theguardian" in lower:
-        return "guardian"
-    if "npr" in lower or "brightspotcdn" in lower:
-        return "npr"
-    if "aljazeera" in lower:
-        return "aljazeera"
-    if "cnn" in lower:
-        return "cnn"
-    return "other"
-
-
-def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    buckets = {"ap": [], "reuters": [], "bbc": [], "guardian": [], "npr": [], "aljazeera": [], "cnn": [], "other": []}
-    seen = set()
-    for img in images:
-        key = canonical_image_key(img)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        buckets.setdefault(source_category(img), buckets["other"]).append(img)
-    for bucket in buckets.values():
-        random.shuffle(bucket)
-
-    # Favor AP/Reuters/world sources while still keeping BBC regional breadth.
-    mixed = (
-        buckets["ap"][:360]
-        + buckets["reuters"][:220]
-        + buckets["aljazeera"][:120]
-        + buckets["cnn"][:90]
-        + buckets["guardian"][:120]
-        + buckets["npr"][:70]
-        + buckets["bbc"][:260]
-        + buckets["other"][:80]
-    )
-    random.shuffle(mixed)
-    return mixed[:limit]
 
 
 def upgrade_bbc_image_url(url):
@@ -246,7 +141,14 @@ def clean_extracted_image_url(url):
     if not url.startswith("http"):
         return None
     lower = url.lower()
-    if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
+    if lower.endswith(".svg") or ".svg?" in lower:
+        return None
+    if "apnews" in lower and (lower.endswith(".png") or ".png?" in lower):
+        return None
+    if any(bad in lower for bad in [
+        "logo", "placeholder", "blank", "sprite", "icon",
+        "typeshift", "pileup", "memoku",
+    ]):
         return None
     return upgrade_bbc_image_url(url)
 
@@ -658,7 +560,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         except Exception:
             continue
 
-    images = weighted_image_mix(images, limit=limit)
+    random.shuffle(images)
     IMAGE_CACHE["time"] = now
     IMAGE_CACHE["images"] = images[:]
     return images[:limit]
@@ -956,7 +858,7 @@ def render_html():
 <title>misshurry</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
+html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:crosshair; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{ position:fixed; bottom:8px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,.52); font:11px monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90vw; z-index:50; cursor:copy; user-select:none; pointer-events:auto; background:rgba(0,0,0,.28); padding:3px 6px; border-radius:4px; }}
 </style>
@@ -1008,45 +910,49 @@ function makeImage(sourceImage) {{
   for(let i=0;i<data.length;i+=4) {{ let gray = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; gray = Math.round(gray/step)*step; data[i]=gray; data[i+1]=gray; data[i+2]=gray; data[i+3]=255; }}
   offCtx.putImageData(imageData,0,0); return off;
 }}
-function drawFallbackMessage() {{
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
+function drawFallbackMessage() {{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height); }}
+let flashlightBuffer = document.createElement("canvas");
+let flashlightBufferCtx = flashlightBuffer.getContext("2d", {{ willReadFrequently: true }});
+function ensureFlashlightBuffer() {{
+  if (flashlightBuffer.width !== canvas.width || flashlightBuffer.height !== canvas.height) {{
+    flashlightBuffer.width = canvas.width;
+    flashlightBuffer.height = canvas.height;
+    syncContextQuality(flashlightBufferCtx);
+  }}
 }}
 function drawFlashlight() {{
   if (!currentPrepared) return;
-
+  ensureFlashlightBuffer();
+  const bctx = flashlightBufferCtx;
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const radius = Math.sqrt(canvas.width*canvas.width + canvas.height*canvas.height) * (isTouchDevice ? 0.13 : 0.075);
-
-  // One clean frame per animation tick: image, dark veil, then cutout.
-  // This avoids the hard black blink caused by multiple clears/composite passes.
+  bctx.globalCompositeOperation = "source-over";
+  bctx.clearRect(0,0,canvas.width,canvas.height);
+  bctx.fillStyle = "#000";
+  bctx.fillRect(0,0,canvas.width,canvas.height);
+  const cutout = bctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
+  cutout.addColorStop(0.00,"rgba(255,248,190,1.00)");
+  cutout.addColorStop(0.20,"rgba(255,238,150,0.84)");
+  cutout.addColorStop(0.50,"rgba(255,220,95,0.46)");
+  cutout.addColorStop(0.82,"rgba(255,200,55,0.18)");
+  cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
+  bctx.globalCompositeOperation = "destination-out";
+  bctx.fillStyle = cutout;
+  bctx.fillRect(0,0,canvas.width,canvas.height);
+  bctx.globalCompositeOperation = "destination-over";
+  bctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
+  bctx.globalCompositeOperation = "source-atop";
+  const warm = bctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius*1.10);
+  warm.addColorStop(0.00,"rgba(255,222,95,0.32)");
+  warm.addColorStop(0.45,"rgba(255,205,60,0.16)");
+  warm.addColorStop(0.85,"rgba(255,185,35,0.055)");
+  warm.addColorStop(1.00,"rgba(255,170,20,0.00)");
+  bctx.fillStyle = warm;
+  bctx.fillRect(0,0,canvas.width,canvas.height);
+  bctx.globalCompositeOperation = "source-over";
   ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
-
-  ctx.fillStyle = "rgba(0,0,0,0.92)";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
-  cutout.addColorStop(0.00,"rgba(255,255,255,1.00)");
-  cutout.addColorStop(0.24,"rgba(255,255,255,0.92)");
-  cutout.addColorStop(0.54,"rgba(255,255,255,0.38)");
-  cutout.addColorStop(0.82,"rgba(255,255,255,0.14)");
-  cutout.addColorStop(1.00,"rgba(255,255,255,0.00)");
-
-  ctx.globalCompositeOperation = "destination-out";
-  ctx.fillStyle = cutout;
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  ctx.globalCompositeOperation = "source-over";
-  const warm = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius*1.12);
-  warm.addColorStop(0.00,"rgba(255,222,95,0.20)");
-  warm.addColorStop(0.45,"rgba(255,205,60,0.12)");
-  warm.addColorStop(0.90,"rgba(255,185,35,0.035)");
-  warm.addColorStop(1.00,"rgba(255,170,20,0.00)");
-  ctx.fillStyle = warm;
-  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(flashlightBuffer,0,0);
 }}
 function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
@@ -1055,7 +961,7 @@ function prepareAndDraw(img, src) {{
   const el = document.getElementById("debug-url"); el.textContent = rawUrl; el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
 }}
 function loadRandomSlide(attempts=0) {{
-  if (isLoadingSlide) return; isLoadingSlide = true; resizeCanvas();
+  if (isLoadingSlide) return; isLoadingSlide = true;
   if (!slides.length || attempts > 80) {{ isLoadingSlide=false; return; }}
   const src = getNextRandomSrc(); if (!src) {{ isLoadingSlide=false; return; }}
   const loader = new Image(); loader.decoding = "async";
