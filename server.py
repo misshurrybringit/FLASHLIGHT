@@ -15,7 +15,9 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
-    # Broad world/news feeds. Excludes BBC science/business/tech/health/entertainment.
+    # Scene-first feeds. Removed BBC business / technology / health /
+    # entertainment / science because they often produce headshots, podiums,
+    # product shots, studio portraits, and generic cropped editorial images.
     "https://feeds.bbci.co.uk/news/rss.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
@@ -33,55 +35,42 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
-    # AP world/politics/regional pages.
+    # AP/Reuters sections that tend to return event scenes instead of generic
+    # tech/business/entertainment portrait cards.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/hub/ap-top-news",
-    "https://apnews.com/hub/world-news",
-    "https://apnews.com/hub/us-news",
-    "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/europe",
-    "https://apnews.com/hub/asia-pacific",
-    "https://apnews.com/hub/africa",
-    "https://apnews.com/hub/latin-america",
-    "https://apnews.com/hub/middle-east",
-    "https://apnews.com/hub/immigration",
-    "https://apnews.com/hub/natural-disasters",
-    "https://apnews.com/hub/ukraine",
-    "https://apnews.com/hub/russia-ukraine",
-    "https://apnews.com/hub/israel-hamas-war",
-
-    # Reuters world/regional/pictures pages.
+    "https://apnews.com/sports",
+    "https://apnews.com/climate-and-environment",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/world/europe/",
-    "https://www.reuters.com/world/china/",
-    "https://www.reuters.com/world/middle-east/",
-    "https://www.reuters.com/world/africa/",
-    "https://www.reuters.com/world/americas/",
     "https://www.reuters.com/pictures/",
-
-    # Guardian/NPR fallbacks.
-    "https://www.theguardian.com/world",
-    "https://www.theguardian.com/us-news",
-    "https://www.npr.org/sections/news/",
 ]
 
 
 # Direct public section pages. These are scraped for image URLs because several
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
-    # AP world/politics/regional pages.
+    # AP is favored because it tends to supply more event/scene photos than BBC cards.
+    # Removed AP business / entertainment / technology / health / science hubs because
+    # they often add generic portraits, product shots, conference panels, and crops.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
+    "https://apnews.com/sports",
+    "https://apnews.com/climate-and-environment",
+    "https://apnews.com/religion",
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
     "https://apnews.com/hub/politics",
+    "https://apnews.com/hub/sports",
+    "https://apnews.com/hub/photography",
+    "https://apnews.com/hub/photos",
+    "https://apnews.com/hub/photo-gallery",
+    "https://apnews.com/hub/ap-photos",
     "https://apnews.com/hub/europe",
     "https://apnews.com/hub/asia-pacific",
     "https://apnews.com/hub/africa",
@@ -90,30 +79,31 @@ DIRECT_IMAGE_PAGES = [
     "https://apnews.com/hub/immigration",
     "https://apnews.com/hub/natural-disasters",
     "https://apnews.com/hub/ukraine",
-    "https://apnews.com/hub/russia-ukraine",
     "https://apnews.com/hub/israel-hamas-war",
+    "https://apnews.com/hub/united-nations",
+    "https://apnews.com/hub/climate-and-environment",
+    "https://apnews.com/hub/elections",
+    "https://apnews.com/hub/european-union",
 
-    # Reuters world/regional/pictures pages.
+    # Reuters public pages can be inconsistent, but these are attempted briefly.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/world/europe/",
-    "https://www.reuters.com/world/china/",
-    "https://www.reuters.com/world/middle-east/",
-    "https://www.reuters.com/world/africa/",
-    "https://www.reuters.com/world/americas/",
     "https://www.reuters.com/pictures/",
 
-    # Other broad news pages.
+    # Extra public pages that usually expose straightforward image URLs.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
-    "https://www.bbc.com/news/world",
     "https://www.npr.org/sections/news/",
 ]
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:150.0) Gecko/20100101 Firefox/150.0",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
-MAX_IMAGE_POOL = 1400
-SEQUENCE_LENGTH = 1100
+MAX_IMAGE_POOL = 2200
+SEQUENCE_LENGTH = 1800
 IMAGE_CACHE = {"time": 0, "images": []}
 CACHE_SECONDS = 60
 
@@ -134,8 +124,6 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "00a03cc0", "929fd780", "06449360", "f4ee5fc0",
     "cfcd74b0", "7488a0b0", "72e83b70", "acb55400",
     "5a8f0590",
-    "typeshift.svg", "pileup.svg", "memoku.svg",
-    "f0ccbee0",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -171,34 +159,6 @@ def url_is_disallowed_graphic_asset(url):
     return False
 
 
-
-
-def image_url_looks_vertical_or_phone_crop(url):
-    """Fast URL-level guard for portrait/phone crops before proxy fetch."""
-    lower = (url or "").lower()
-    if url_is_vertical_only(lower):
-        return True
-    for pattern in (r"/crop/(\d+)x(\d+)", r"/resize/(\d+)x(\d+)!", r"/ic/(\d+)x(\d+)/"):
-        m = re.search(pattern, lower)
-        if m:
-            w, h = int(m.group(1)), int(m.group(2))
-            if h > w * 1.02:
-                return True
-    return False
-
-
-def image_bytes_are_vertical(data, max_ratio=1.02):
-    """Decode enough to reject true vertical images at the proxy level."""
-    try:
-        arr = np.frombuffer(data, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    except Exception:
-        return False
-    if img is None or img.size == 0:
-        return False
-    h, w = img.shape[:2]
-    return h > w * max_ratio
-
 def upgrade_bbc_image_url(url):
     if not url:
         return url
@@ -221,9 +181,16 @@ def clean_extracted_image_url(url):
     if not url.startswith("http"):
         return None
     lower = url.lower()
-    if url_is_disallowed_graphic_asset(lower):
+
+    # AP/other news CDNs also host SVG/PNG graphics and UI art. These are
+    # almost never the scene photos wanted for this project, so reject them
+    # before they ever enter the slide pool.
+    if lower.endswith(".svg") or ".svg?" in lower:
         return None
-    if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
+    if "apnews" in lower and (lower.endswith(".png") or ".png?" in lower):
+        return None
+
+    if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon", "type", "typeshift", "pileup", "memoku"]):
         return None
     return upgrade_bbc_image_url(url)
 
@@ -403,10 +370,62 @@ def absolutize_url(url, base_url):
     return url
 
 
+def html_unescape_js_urls(text):
+    """Make image URLs embedded inside AP/Next JSON easier to regex."""
+    if not text:
+        return ""
+    return (
+        text
+        .replace("\\u002F", "/")
+        .replace("\\/", "/")
+        .replace("&amp;", "&")
+        .replace("%3A", ":")
+        .replace("%2F", "/")
+    )
+
+
 def extract_image_urls_from_html(html, base_url, limit=80):
     found = []
+    seen = set()
 
-    # Meta image tags.
+    def add_raw(raw):
+        if not raw:
+            return False
+        # srcset: take the largest-ish candidate, usually last.
+        if "," in raw and (" " in raw):
+            parts = [p.strip().split(" ")[0] for p in raw.split(",") if p.strip()]
+            raw = parts[-1] if parts else raw
+
+        img = absolutize_url(raw, base_url)
+        img = clean_extracted_image_url(img)
+        if not img:
+            return False
+
+        lower = img.lower()
+        if any(bad in lower for bad in ["logo", "icon", "avatar", "placeholder", "sprite", "tracking", "favicon"]):
+            return False
+
+        if not any(good in lower for good in [
+            "ichef.bbci.co.uk",
+            "dims.apnews.com",
+            "assets.apnews.com",
+            "static.reuters.com",
+            "cloudfront-us-east-2.images.arcpublishing.com",
+            "media.guim.co.uk",
+            "npr.brightspotcdn.com",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+        ]):
+            return False
+
+        key = normalize_image_url_for_dedupe(img)
+        if not key or key in seen:
+            return False
+        seen.add(key)
+        found.append(img)
+        return True
+
     patterns = [
         r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
         r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
@@ -419,53 +438,36 @@ def extract_image_urls_from_html(html, base_url, limit=80):
 
     for pattern in patterns:
         for m in re.finditer(pattern, html, re.IGNORECASE):
-            raw = m.group(1)
-            # srcset: take the largest-ish candidate, usually last.
-            if "," in raw and (" " in raw):
-                parts = [p.strip().split(" ")[0] for p in raw.split(",") if p.strip()]
-                raw = parts[-1] if parts else raw
-
-            img = absolutize_url(raw, base_url)
-            lower = img.lower()
-
-            if not img.startswith("http"):
-                continue
-
-            if any(bad in lower for bad in ["logo", "icon", "avatar", "placeholder", "sprite", "tracking"]):
-                continue
-
-            if not any(good in lower for good in [
-                "ichef.bbci.co.uk",
-                "dims.apnews.com",
-                "assets.apnews.com",
-                "static.reuters.com",
-                "cloudfront-us-east-2.images.arcpublishing.com",
-                "media.guim.co.uk",
-                "npr.brightspotcdn.com",
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".webp",
-            ]):
-                continue
-
-            found.append(upgrade_bbc_image_url(img))
-
+            add_raw(m.group(1))
             if len(found) >= limit:
-                break
+                return found[:limit]
 
-        if len(found) >= limit:
-            break
+    # AP often hides the useful photo URLs in script/JSON blobs instead of img tags.
+    # This second pass pulls those out directly.
+    expanded = html_unescape_js_urls(html)
+    url_patterns = [
+        r'https://dims\.apnews\.com/[^"\'\s<>]+',
+        r'https://assets\.apnews\.com/[^"\'\s<>]+',
+        r'https://cloudfront-us-east-2\.images\.arcpublishing\.com/[^"\'\s<>]+',
+        r'https://media\.guim\.co\.uk/[^"\'\s<>]+',
+        r'https://npr\.brightspotcdn\.com/[^"\'\s<>]+',
+    ]
+    for pattern in url_patterns:
+        for m in re.finditer(pattern, expanded, re.IGNORECASE):
+            raw = m.group(0).rstrip('.,;)}]')
+            add_raw(raw)
+            if len(found) >= limit:
+                return found[:limit]
 
     return found[:limit]
 
-
-def get_direct_page_images(limit=360):
+def get_direct_page_images(limit=560):
     images = []
     seen = set()
     pages = DIRECT_IMAGE_PAGES[:]
 
-    # AP first, then everything else shuffled.
+    # AP gets its own larger crawl because AP's useful photos usually appear on
+    # article pages / JSON blobs, not in a simple RSS image field.
     ap_pages = [p for p in pages if "apnews.com" in p]
     other_pages = [p for p in pages if "apnews.com" not in p]
     random.shuffle(ap_pages)
@@ -473,15 +475,18 @@ def get_direct_page_images(limit=360):
     pages = ap_pages + other_pages
 
     start_time = time.time()
-    page_budget_seconds = 8.0
-    article_scrape_budget = 70
-    article_scrapes = 0
+    ap_page_budget_seconds = 14.0
+    other_page_budget_seconds = 5.0
+    ap_article_scrape_budget = 180
+    other_article_scrape_budget = 30
+    ap_article_scrapes = 0
+    other_article_scrapes = 0
 
     def add_candidate(img):
         if not img:
             return False
         img = clean_extracted_image_url(img)
-        if not img or url_is_known_bad(img) or url_is_disallowed_graphic_asset(img) or image_url_looks_vertical_or_phone_crop(img):
+        if not img or url_is_known_bad(img) or url_is_disallowed_graphic_asset(img):
             return False
         key = normalize_image_url_for_dedupe(img)
         if not key or key in seen:
@@ -491,39 +496,50 @@ def get_direct_page_images(limit=360):
         return True
 
     for page_url in pages:
+        is_ap = "apnews.com" in page_url
         if len(images) >= limit:
             break
-        if time.time() - start_time > page_budget_seconds and images:
-            break
+        elapsed = time.time() - start_time
+        if is_ap:
+            if elapsed > ap_page_budget_seconds and images:
+                continue
+        else:
+            if elapsed > ap_page_budget_seconds + other_page_budget_seconds and images:
+                break
 
         try:
-            html = fetch_text(page_url, timeout=2.8)
+            html = fetch_text(page_url, timeout=3.2 if is_ap else 2.4)
 
-            # Inline images from section pages.
-            candidates = extract_image_urls_from_html(html, page_url, limit=110)
+            # Inline/JSON images from section pages.
+            candidates = extract_image_urls_from_html(html, page_url, limit=170 if is_ap else 55)
+            # Keep AP early in the final list; shuffle within source so it still feels live.
             random.shuffle(candidates)
             for img in candidates:
                 add_candidate(img)
                 if len(images) >= limit:
                     break
 
-            # Follow article links, especially useful for AP, where article pages
-            # expose og:image/dims URLs more reliably than RSS.
             links = extract_article_links_from_html(
                 html,
                 page_url,
-                max_links=55 if "apnews.com" in page_url else 18,
+                max_links=120 if is_ap else 22,
             )
             random.shuffle(links)
             for link in links:
-                if len(images) >= limit or article_scrapes >= article_scrape_budget:
+                if len(images) >= limit:
                     break
-                article_scrapes += 1
+                if is_ap:
+                    if ap_article_scrapes >= ap_article_scrape_budget:
+                        break
+                    ap_article_scrapes += 1
+                else:
+                    if other_article_scrapes >= other_article_scrape_budget:
+                        break
+                    other_article_scrapes += 1
                 try:
-                    article_html = fetch_text(link, timeout=2.5)
-                    article_imgs = extract_image_urls_from_html(article_html, link, limit=8)
-                    # og/twitter image usually comes first and is more article-relevant.
-                    for img in article_imgs[:4]:
+                    article_html = fetch_text(link, timeout=2.8 if is_ap else 2.2)
+                    article_imgs = extract_image_urls_from_html(article_html, link, limit=18 if is_ap else 5)
+                    for img in article_imgs[:8 if is_ap else 3]:
                         add_candidate(img)
                         if len(images) >= limit:
                             break
@@ -533,7 +549,8 @@ def get_direct_page_images(limit=360):
         except Exception:
             continue
 
-    random.shuffle(images)
+    # Do not shuffle the entire result: AP pages were intentionally crawled first,
+    # so keeping this order gives AP more representation in the first rendered pool.
     return images[:limit]
 
 def extract_image_from_html_page(url):
@@ -549,6 +566,54 @@ def is_bbc_feed_url(url):
     return "bbci.co.uk" in url or "bbc.co.uk" in url
 
 
+def source_category(url):
+    lower = (url or "").lower()
+    if "apnews.com" in lower or "assets.apnews.com" in lower or "dims.apnews.com" in lower:
+        return "ap"
+    if "reuters" in lower:
+        return "reuters"
+    if "guim.co.uk" in lower or "theguardian" in lower:
+        return "guardian"
+    if "npr" in lower or "brightspotcdn" in lower:
+        return "npr"
+    if "bbci.co.uk" in lower or "bbc.co.uk" in lower:
+        return "bbc"
+    return "other"
+
+
+def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
+    """Favor AP/Reuters/other non-BBC images so BBC cannot flood the final pool."""
+    buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "bbc": [], "other": []}
+    for img in images:
+        buckets.setdefault(source_category(img), []).append(img)
+
+    for bucket in buckets.values():
+        random.shuffle(bucket)
+
+    # Keep this intentionally AP-heavy. If AP returns fewer images, the other
+    # buckets fill the rest without causing errors.
+    mixed = (
+        buckets["ap"][:420]
+        + buckets["reuters"][:220]
+        + buckets["guardian"][:140]
+        + buckets["npr"][:80]
+        + buckets["other"][:80]
+        + buckets["bbc"][:360]
+    )
+
+    remaining = []
+    already = set(canonical_image_key(i) for i in mixed)
+    for name in ["ap", "reuters", "guardian", "npr", "other", "bbc"]:
+        for img in buckets[name]:
+            key = canonical_image_key(img)
+            if key not in already:
+                already.add(key)
+                remaining.append(img)
+    random.shuffle(remaining)
+    mixed.extend(remaining)
+    return mixed[:limit]
+
+
 def get_bbc_images(limit=MAX_IMAGE_POOL):
     now = time.time()
     if IMAGE_CACHE["images"] and now - IMAGE_CACHE["time"] < CACHE_SECONDS:
@@ -559,15 +624,18 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     images = []
     seen = set()
     start_time = time.time()
-    time_budget_seconds = 9.0
-    non_bbc_article_scrape_budget = 24
+    time_budget_seconds = 18.0
+    non_bbc_article_scrape_budget = 120
     non_bbc_article_scrapes = 0
+    bbc_added = 0
+    # Cap BBC so AP/Reuters/Guardian/NPR are not drowned out whenever BBC feeds are fast.
+    max_bbc_images = int(limit * 0.34)
 
     def add_image(img):
         if not img:
             return False
         img = clean_extracted_image_url(img)
-        if not img or url_is_known_bad(img) or url_is_disallowed_graphic_asset(img) or image_url_looks_vertical_or_phone_crop(img):
+        if not img or url_is_known_bad(img) or url_is_disallowed_graphic_asset(img):
             return False
         key = canonical_image_key(img)
         if not key or key in seen:
@@ -579,8 +647,19 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         images.append(img)
         return True
 
+    # Direct public pages first. This is the most reliable way to get AP scene images.
+    for img in get_direct_page_images(limit=820):
+        if len(images) >= limit:
+            break
+        add_image(img)
+
     feeds = RSS_FEEDS[:]
-    random.shuffle(feeds)
+    # Keep non-BBC feeds before BBC feeds so they are not squeezed out by BBC volume.
+    non_bbc_feeds = [f for f in feeds if not is_bbc_feed_url(f)]
+    bbc_feeds = [f for f in feeds if is_bbc_feed_url(f)]
+    random.shuffle(non_bbc_feeds)
+    random.shuffle(bbc_feeds)
+    feeds = non_bbc_feeds + bbc_feeds
     for feed_url in feeds:
         if len(images) >= limit:
             break
@@ -595,8 +674,12 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             for item in items[:item_limit]:
                 if len(images) >= limit:
                     break
+                if is_bbc_feed_url(feed_url) and bbc_added >= max_bbc_images:
+                    continue
                 img = extract_rss_item_image(item)
                 if add_image(img):
+                    if is_bbc_feed_url(feed_url):
+                        bbc_added += 1
                     continue
                 if not is_bbc_feed_url(feed_url) and non_bbc_article_scrapes < non_bbc_article_scrape_budget:
                     link = item.find("link")
@@ -606,16 +689,10 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         except Exception:
             continue
 
-    # Add a first pass from direct section pages, with AP favored.
-    for img in get_direct_page_images(limit=360):
-        if len(images) >= limit:
-            break
-        add_image(img)
-
     pages = SOURCE_PAGES[:]
     random.shuffle(pages)
     page_article_scrapes = 0
-    page_article_scrape_budget = 46
+    page_article_scrape_budget = 90
     for page_url in pages:
         if len(images) >= limit:
             break
@@ -623,9 +700,9 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             break
         try:
             html = fetch_text(page_url, timeout=2.5)
-            for img in extract_inline_images_from_html(html, page_url, max_images=18):
+            for img in extract_inline_images_from_html(html, page_url, max_images=60):
                 add_image(img)
-            links = extract_article_links_from_html(html, page_url, max_links=24)
+            links = extract_article_links_from_html(html, page_url, max_links=60)
             random.shuffle(links)
             for link in links:
                 if len(images) >= limit or page_article_scrapes >= page_article_scrape_budget:
@@ -635,10 +712,11 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         except Exception:
             continue
 
-    random.shuffle(images)
+    ordered = weighted_image_mix(images, limit=limit)
+
     IMAGE_CACHE["time"] = now
-    IMAGE_CACHE["images"] = images[:]
-    return images[:limit]
+    IMAGE_CACHE["images"] = ordered[:]
+    return ordered[:limit]
 
 
 def image_is_probably_full_graphic_page(data):
@@ -920,7 +998,6 @@ def image_has_center_divider(data):
 
 def render_html():
     images = get_bbc_images(limit=MAX_IMAGE_POOL)
-    random.shuffle(images)
     sequence = []
     for img in images:
         proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
@@ -943,6 +1020,7 @@ canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 <canvas id="view"></canvas>
 <script>
 let slides = {sequence_json};
+slides = slides.filter(s => !/\.svg(\?|$)/i.test(s.raw || s.src) && !/(typeshift|pileup|memoku)/i.test(s.raw || s.src));
 const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
@@ -950,7 +1028,8 @@ let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
-const RECENT_LIMIT = 80;
+let badSrcs = new Set();
+const RECENT_LIMIT = 40;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -966,12 +1045,29 @@ function shuffleArray(arr) {{ const a=arr.slice(); for(let i=a.length-1;i>0;i--)
 function isVerticalPhone() {{ return window.matchMedia("(pointer: coarse)").matches && window.innerHeight > window.innerWidth; }}
 function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly && !isVerticalPhone()); }}
 function refillPool() {{
-  let candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
+  let candidates = slides
+    .filter(slideAllowedForCurrentOrientation)
+    .map(s => s.src)
+    .filter(src => !badSrcs.has(src));
+
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
+
   let fresh = candidates.filter(src => !recentlyShown.includes(src));
-  if (fresh.length < Math.min(20, candidates.length)) fresh = candidates;
-  shuffledPool = shuffleArray(fresh).slice(0, SEQUENCE_LENGTH_JS);
+
+  // If the surviving pool is smaller than recent memory, relax recent memory
+  // instead of forcing the page to repeat one tiny subset forever.
+  if (fresh.length < Math.min(12, candidates.length)) fresh = candidates;
+
+  shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
+
+  console.log("rotation pool", {{
+    totalSlides: slides.length,
+    usable: candidates.length,
+    fresh: fresh.length,
+    bad: badSrcs.size,
+    recent: recentlyShown.length
+  }});
 }}
 function getNextRandomSrc() {{ if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool(); if (!shuffledPool.length) return null; return shuffledPool[poolIndex++]; }}
 function makeImage(sourceImage) {{
@@ -1004,18 +1100,68 @@ function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
   recentlyShown.push(src); if (recentlyShown.length > RECENT_LIMIT) recentlyShown.shift();
   const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
-  const el = document.getElementById("debug-url"); el.textContent = rawUrl; el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
+  const usableEstimate = Math.max(0, slides.length - badSrcs.size);
+  const el = document.getElementById("debug-url");
+  el.textContent = rawUrl + "  [recent " + recentlyShown.length + " / usable ~" + usableEstimate + " / bad " + badSrcs.size + "]";
+  el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
 }}
 function loadRandomSlide(attempts=0) {{
-  if (isLoadingSlide) return; isLoadingSlide = true; resizeCanvas();
-  if (!slides.length || attempts > 80) {{ isLoadingSlide=false; return; }}
-  const src = getNextRandomSrc(); if (!src) {{ isLoadingSlide=false; return; }}
-  const loader = new Image(); loader.decoding = "async";
-  loader.onload = () => {{
-    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{ slides = slides.filter(s => s.src !== src); shuffledPool = shuffledPool.filter(s => s !== src); isLoadingSlide=false; setTimeout(() => loadRandomSlide(attempts+1), 50); return; }}
-    prepareAndDraw(loader, src); isLoadingSlide=false;
+  // Do not let one slow request freeze the whole rotation.
+  if (isLoadingSlide && attempts === 0) return;
+  isLoadingSlide = true;
+  resizeCanvas();
+
+  if (!slides.length || attempts > 90) {{
+    if (badSrcs.size > 0) {{
+      console.log("resetting badSrcs after too many failed attempts", badSrcs.size);
+      badSrcs.clear();
+      refillPool();
+    }}
+    isLoadingSlide = false;
+    return;
+  }}
+
+  const src = getNextRandomSrc();
+  if (!src) {{
+    isLoadingSlide = false;
+    setTimeout(() => {{ refillPool(); loadRandomSlide(attempts + 1); }}, 80);
+    return;
+  }}
+
+  const loader = new Image();
+  loader.decoding = "async";
+
+  let finished = false;
+  const finish = (worked) => {{
+    if (finished) return;
+    finished = true;
+    clearTimeout(loadTimer);
+    isLoadingSlide = false;
+    if (!worked) {{
+      badSrcs.add(src);
+      shuffledPool = shuffledPool.filter(s => s !== src);
+      setTimeout(() => loadRandomSlide(attempts + 1), 35);
+    }}
   }};
-  loader.onerror = () => {{ slides = slides.filter(s => s.src !== src); shuffledPool = shuffledPool.filter(s => s !== src); isLoadingSlide=false; setTimeout(() => loadRandomSlide(attempts+1), 50); }};
+
+  const loadTimer = setTimeout(() => {{
+    console.log("image load timeout", src);
+    finish(false);
+  }}, 2400);
+
+  loader.onload = () => {{
+    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{
+      finish(false);
+      return;
+    }}
+    prepareAndDraw(loader, src);
+    finish(true);
+  }};
+
+  loader.onerror = () => {{
+    finish(false);
+  }};
+
   loader.src = src;
 }}
 function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; drawFlashlight(); }}
@@ -1023,7 +1169,7 @@ canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
-resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide(); setInterval(loadRandomSlide, 5000);
+resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide(); setInterval(loadRandomSlide, 2800);
 </script>
 </body>
 </html>'''
@@ -1081,7 +1227,8 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     counts["other"] += 1
 
-            data = json.dumps({"total": len(images), "counts": counts, "sample": images[:25]}, indent=2).encode("utf-8")
+            ap_sample = [img for img in images if "apnews.com" in img.lower()][:40]
+            data = json.dumps({"total": len(images), "counts": counts, "ap_sample": ap_sample, "sample": images[:40]}, indent=2).encode("utf-8")
             self.safe_send_bytes(200, data, "application/json; charset=utf-8", {"Cache-Control": "no-store"})
             return
 
@@ -1093,12 +1240,7 @@ class Handler(BaseHTTPRequestHandler):
             if url_is_known_bad(url) or url_is_disallowed_graphic_asset(url):
                 REJECT_CACHE[url] = {"time": time.time()}
                 print("[REJECT known bad/graphic asset]", url)
-                self.safe_send_bytes(415, b"Known bad image", extra_headers={"Cache-Control": "no-store"})
-                return
-            if image_url_looks_vertical_or_phone_crop(url):
-                REJECT_CACHE[url] = {"time": time.time()}
-                print("[REJECT vertical URL]", url)
-                self.safe_send_bytes(415, b"Rejected vertical image", extra_headers={"Cache-Control": "no-store"})
+                self.safe_send_bytes(415, b"Known bad or graphic asset", extra_headers={"Cache-Control": "no-store"})
                 return
             cleanup_proxy_cache()
             cached = PROXY_CACHE.get(url)
@@ -1107,21 +1249,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 data, content_type = fetch_bytes(url, timeout=8)
-                lower_url = url.lower()
-                lower_content_type = content_type.lower()
                 if not content_type.startswith("image/"):
                     REJECT_CACHE[url] = {"time": time.time()}
                     self.safe_send_bytes(415, b"Not an image", extra_headers={"Cache-Control": "no-store"})
                     return
-                if lower_url.endswith(".svg") or ".svg?" in lower_url or "svg" in lower_content_type:
+                if "svg" in content_type.lower() or url_is_disallowed_graphic_asset(url):
                     REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT svg graphic]", url)
-                    self.safe_send_bytes(415, b"Rejected svg graphic", extra_headers={"Cache-Control": "no-store"})
-                    return
-                if image_bytes_are_vertical(data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT vertical bytes]", url)
-                    self.safe_send_bytes(415, b"Rejected vertical image", extra_headers={"Cache-Control": "no-store"})
+                    print("[REJECT svg/png graphic asset]", url)
+                    self.safe_send_bytes(415, b"Rejected graphic asset", extra_headers={"Cache-Control": "no-store"})
                     return
                 test_data = data
                 try:
