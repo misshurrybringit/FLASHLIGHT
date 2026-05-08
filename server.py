@@ -18,12 +18,19 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/rss.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
+    "https://feeds.bbci.co.uk/news/world/australia/rss.xml",
     "https://feeds.bbci.co.uk/news/world/europe/rss.xml",
     "https://feeds.bbci.co.uk/news/world/asia/rss.xml",
     "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
     "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
     "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
+    "https://feeds.bbci.co.uk/news/uk/rss.xml",
+    "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "https://feeds.bbci.co.uk/news/technology/rss.xml",
+    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
+    "https://feeds.bbci.co.uk/news/health/rss.xml",
     "https://feeds.apnews.com/rss/apf-topnews",
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
@@ -31,55 +38,68 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
+    "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
+    "https://apnews.com/business",
+    "https://apnews.com/entertainment",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
+    "https://www.reuters.com/business/",
+    "https://www.reuters.com/technology/",
     "https://www.reuters.com/pictures/",
 ]
 
+
+# Direct public section pages. These are scraped for image URLs because several
+# non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
+    # AP is favored because it tends to supply more event/scene photos than BBC cards.
+    "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
+    "https://apnews.com/business",
+    "https://apnews.com/entertainment",
+    "https://apnews.com/sports",
+    "https://apnews.com/science",
+    "https://apnews.com/health",
+    "https://apnews.com/climate-and-environment",
+    "https://apnews.com/religion",
+    "https://apnews.com/technology",
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
     "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/europe",
-    "https://apnews.com/hub/asia-pacific",
-    "https://apnews.com/hub/africa",
-    "https://apnews.com/hub/latin-america",
-    "https://apnews.com/hub/middle-east",
-    "https://apnews.com/hub/immigration",
-    "https://apnews.com/hub/natural-disasters",
-    "https://apnews.com/hub/ukraine",
-    "https://apnews.com/hub/israel-hamas-war",
+    "https://apnews.com/hub/business",
+    "https://apnews.com/hub/sports",
+    "https://apnews.com/hub/entertainment",
+    "https://apnews.com/hub/science",
+
+    # Reuters public pages can be inconsistent, but these are attempted briefly.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/world/europe/",
-    "https://www.reuters.com/world/asia-pacific/",
-    "https://www.reuters.com/world/middle-east/",
-    "https://www.reuters.com/world/africa/",
-    "https://www.reuters.com/world/americas/",
+    "https://www.reuters.com/business/",
+    "https://www.reuters.com/technology/",
     "https://www.reuters.com/pictures/",
+
+    # Extra public pages that usually expose straightforward image URLs.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
-    "https://www.bbc.com/news/world",
     "https://www.npr.org/sections/news/",
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-MAX_IMAGE_POOL = 1400
-SEQUENCE_LENGTH = 1100
+MAX_IMAGE_POOL = 1800
+SEQUENCE_LENGTH = 1600
 IMAGE_CACHE = {"time": 0, "images": []}
 CACHE_SECONDS = 60
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 420
+PROXY_CACHE_MAX_ITEMS = 720
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -93,9 +113,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "c5a74450", "f53b6250", "p0ngd4cc",
     "00a03cc0", "929fd780", "06449360", "f4ee5fc0",
     "cfcd74b0", "7488a0b0", "72e83b70", "acb55400",
-    "5a8f0590", "f055ab30", "f0ccbee0",
+    "5a8f0590",
     "typeshift.svg", "pileup.svg", "memoku.svg",
-    "bae9d7794692aee65c34b848aae2", "strait-of-hormuz-3x2-v2",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -107,8 +126,7 @@ VOICE_CROP_URL_FRAGMENTS = ["f16b6b80"]
 
 
 def url_is_known_bad(url):
-    lower = (url or "").lower()
-    return any(fragment.lower() in lower for fragment in KNOWN_BAD_URL_FRAGMENTS)
+    return any(fragment in url for fragment in KNOWN_BAD_URL_FRAGMENTS)
 
 
 def url_is_vertical_only(url):
@@ -141,14 +159,13 @@ def clean_extracted_image_url(url):
     if not url.startswith("http"):
         return None
     lower = url.lower()
+    # AP and other news sites use SVG/PNG for graphics, charts, and illustrations.
+    # Keep these out before they ever enter the rotation pool.
     if lower.endswith(".svg") or ".svg?" in lower:
         return None
     if "apnews" in lower and (lower.endswith(".png") or ".png?" in lower):
         return None
-    if any(bad in lower for bad in [
-        "logo", "placeholder", "blank", "sprite", "icon",
-        "typeshift", "pileup", "memoku",
-    ]):
+    if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
         return None
     return upgrade_bbc_image_url(url)
 
@@ -385,7 +402,7 @@ def extract_image_urls_from_html(html, base_url, limit=80):
     return found[:limit]
 
 
-def get_direct_page_images(limit=360):
+def get_direct_page_images(limit=760):
     images = []
     seen = set()
     pages = DIRECT_IMAGE_PAGES[:]
@@ -398,8 +415,8 @@ def get_direct_page_images(limit=360):
     pages = ap_pages + other_pages
 
     start_time = time.time()
-    page_budget_seconds = 8.0
-    article_scrape_budget = 70
+    page_budget_seconds = 11.5
+    article_scrape_budget = 130
     article_scrapes = 0
 
     def add_candidate(img):
@@ -437,7 +454,7 @@ def get_direct_page_images(limit=360):
             links = extract_article_links_from_html(
                 html,
                 page_url,
-                max_links=55 if "apnews.com" in page_url else 18,
+                max_links=85 if "apnews.com" in page_url else 32,
             )
             random.shuffle(links)
             for link in links:
@@ -484,8 +501,8 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     images = []
     seen = set()
     start_time = time.time()
-    time_budget_seconds = 9.0
-    non_bbc_article_scrape_budget = 24
+    time_budget_seconds = 12.0
+    non_bbc_article_scrape_budget = 65
     non_bbc_article_scrapes = 0
 
     def add_image(img):
@@ -858,9 +875,10 @@ def render_html():
 <title>misshurry</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:crosshair; }}
-canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
-#debug-url {{ position:fixed; bottom:8px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,.52); font:11px monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90vw; z-index:50; cursor:copy; user-select:none; pointer-events:auto; background:rgba(0,0,0,.28); padding:3px 6px; border-radius:4px; }}
+html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none !important; }}
+* {{ cursor:none !important; }}
+canvas {{ display:block; width:100vw; height:100vh; touch-action:none; cursor:none !important; }}
+#debug-url {{ position:fixed; bottom:8px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,.52); font:11px monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90vw; z-index:50; user-select:none; pointer-events:auto; background:rgba(0,0,0,.28); padding:3px 6px; border-radius:4px; }}
 </style>
 </head>
 <body>
@@ -875,7 +893,8 @@ let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
-const RECENT_LIMIT = 80;
+let badSrcs = new Set();
+const RECENT_LIMIT = 45;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -891,11 +910,22 @@ function shuffleArray(arr) {{ const a=arr.slice(); for(let i=a.length-1;i>0;i--)
 function isVerticalPhone() {{ return window.matchMedia("(pointer: coarse)").matches && window.innerHeight > window.innerWidth; }}
 function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly && !isVerticalPhone()); }}
 function refillPool() {{
-  let candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
+  let candidates = slides
+    .filter(slideAllowedForCurrentOrientation)
+    .map(s => s.src)
+    .filter(src => !badSrcs.has(src));
+
+  // If the fail list gets too large, reset it once so a temporary network hiccup
+  // cannot collapse the slideshow down to a tiny survivor set.
+  if (candidates.length < 18 && badSrcs.size > 0) {{
+    badSrcs.clear();
+    candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
+  }}
+
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
   let fresh = candidates.filter(src => !recentlyShown.includes(src));
-  if (fresh.length < Math.min(20, candidates.length)) fresh = candidates;
-  shuffledPool = shuffleArray(fresh).slice(0, SEQUENCE_LENGTH_JS);
+  if (fresh.length < Math.min(12, candidates.length)) fresh = candidates;
+  shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
 }}
 function getNextRandomSrc() {{ if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool(); if (!shuffledPool.length) return null; return shuffledPool[poolIndex++]; }}
@@ -910,49 +940,45 @@ function makeImage(sourceImage) {{
   for(let i=0;i<data.length;i+=4) {{ let gray = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; gray = Math.round(gray/step)*step; data[i]=gray; data[i+1]=gray; data[i+2]=gray; data[i+3]=255; }}
   offCtx.putImageData(imageData,0,0); return off;
 }}
-function drawFallbackMessage() {{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height); }}
-let flashlightBuffer = document.createElement("canvas");
-let flashlightBufferCtx = flashlightBuffer.getContext("2d", {{ willReadFrequently: true }});
-function ensureFlashlightBuffer() {{
-  if (flashlightBuffer.width !== canvas.width || flashlightBuffer.height !== canvas.height) {{
-    flashlightBuffer.width = canvas.width;
-    flashlightBuffer.height = canvas.height;
-    syncContextQuality(flashlightBufferCtx);
-  }}
+function drawFallbackMessage() {{
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
 }}
 function drawFlashlight() {{
   if (!currentPrepared) return;
-  ensureFlashlightBuffer();
-  const bctx = flashlightBufferCtx;
+
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const radius = Math.sqrt(canvas.width*canvas.width + canvas.height*canvas.height) * (isTouchDevice ? 0.13 : 0.075);
-  bctx.globalCompositeOperation = "source-over";
-  bctx.clearRect(0,0,canvas.width,canvas.height);
-  bctx.fillStyle = "#000";
-  bctx.fillRect(0,0,canvas.width,canvas.height);
-  const cutout = bctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
-  cutout.addColorStop(0.00,"rgba(255,248,190,1.00)");
-  cutout.addColorStop(0.20,"rgba(255,238,150,0.84)");
-  cutout.addColorStop(0.50,"rgba(255,220,95,0.46)");
-  cutout.addColorStop(0.82,"rgba(255,200,55,0.18)");
-  cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
-  bctx.globalCompositeOperation = "destination-out";
-  bctx.fillStyle = cutout;
-  bctx.fillRect(0,0,canvas.width,canvas.height);
-  bctx.globalCompositeOperation = "destination-over";
-  bctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
-  bctx.globalCompositeOperation = "source-atop";
-  const warm = bctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius*1.10);
-  warm.addColorStop(0.00,"rgba(255,222,95,0.32)");
-  warm.addColorStop(0.45,"rgba(255,205,60,0.16)");
-  warm.addColorStop(0.85,"rgba(255,185,35,0.055)");
-  warm.addColorStop(1.00,"rgba(255,170,20,0.00)");
-  bctx.fillStyle = warm;
-  bctx.fillRect(0,0,canvas.width,canvas.height);
-  bctx.globalCompositeOperation = "source-over";
+
+  // One clean frame per animation tick: image, dark veil, then cutout.
+  // This avoids the hard black blink caused by multiple clears/composite passes.
   ctx.globalCompositeOperation = "source-over";
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(flashlightBuffer,0,0);
+  ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
+
+  ctx.fillStyle = "rgba(0,0,0,0.92)";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
+  cutout.addColorStop(0.00,"rgba(255,255,255,1.00)");
+  cutout.addColorStop(0.24,"rgba(255,255,255,0.92)");
+  cutout.addColorStop(0.54,"rgba(255,255,255,0.38)");
+  cutout.addColorStop(0.82,"rgba(255,255,255,0.14)");
+  cutout.addColorStop(1.00,"rgba(255,255,255,0.00)");
+
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.fillStyle = cutout;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  ctx.globalCompositeOperation = "source-over";
+  const warm = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius*1.12);
+  warm.addColorStop(0.00,"rgba(255,222,95,0.20)");
+  warm.addColorStop(0.45,"rgba(255,205,60,0.12)");
+  warm.addColorStop(0.90,"rgba(255,185,35,0.035)");
+  warm.addColorStop(1.00,"rgba(255,170,20,0.00)");
+  ctx.fillStyle = warm;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
 }}
 function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
@@ -961,15 +987,55 @@ function prepareAndDraw(img, src) {{
   const el = document.getElementById("debug-url"); el.textContent = rawUrl; el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
 }}
 function loadRandomSlide(attempts=0) {{
-  if (isLoadingSlide) return; isLoadingSlide = true;
-  if (!slides.length || attempts > 80) {{ isLoadingSlide=false; return; }}
-  const src = getNextRandomSrc(); if (!src) {{ isLoadingSlide=false; return; }}
-  const loader = new Image(); loader.decoding = "async";
-  loader.onload = () => {{
-    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{ slides = slides.filter(s => s.src !== src); shuffledPool = shuffledPool.filter(s => s !== src); isLoadingSlide=false; setTimeout(() => loadRandomSlide(attempts+1), 50); return; }}
-    prepareAndDraw(loader, src); isLoadingSlide=false;
+  if (isLoadingSlide) return;
+  isLoadingSlide = true;
+
+  if (!slides.length || attempts > 120) {{
+    isLoadingSlide = false;
+    return;
+  }}
+
+  const src = getNextRandomSrc();
+  if (!src) {{
+    isLoadingSlide = false;
+    refillPool();
+    return;
+  }}
+
+  const loader = new Image();
+  loader.decoding = "async";
+
+  let settled = false;
+  const skipAndTryNext = (markBad = false) => {{
+    if (settled) return;
+    settled = true;
+    if (markBad) {{
+      badSrcs.add(src);
+      shuffledPool = shuffledPool.filter(s => s !== src);
+    }}
+    isLoadingSlide = false;
+    setTimeout(() => loadRandomSlide(attempts + 1), 45);
   }};
-  loader.onerror = () => {{ slides = slides.filter(s => s.src !== src); shuffledPool = shuffledPool.filter(s => s !== src); isLoadingSlide=false; setTimeout(() => loadRandomSlide(attempts+1), 50); }};
+
+  // Some AP/BBC images are just slow; do not permanently remove them on timeout.
+  const timeoutId = setTimeout(() => skipAndTryNext(false), 5200);
+
+  loader.onload = () => {{
+    if (settled) return;
+    clearTimeout(timeoutId);
+    settled = true;
+
+    // Do not mutate the master slides array. Mark bad/vertical images and keep moving.
+    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.05) {{
+      skipAndTryNext(true);
+      return;
+    }}
+
+    prepareAndDraw(loader, src);
+    isLoadingSlide = false;
+  }};
+
+  loader.onerror = () => skipAndTryNext(true);
   loader.src = src;
 }}
 let rafPending = false;
@@ -1074,6 +1140,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 data, content_type = fetch_bytes(url, timeout=8)
+                lower_url = url.lower()
+                lower_content_type = content_type.lower()
+                if (lower_url.endswith(".svg") or ".svg?" in lower_url or "svg" in lower_content_type):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT svg graphic]", url)
+                    self.safe_send_bytes(415, b"Rejected svg graphic", extra_headers={"Cache-Control": "no-store"})
+                    return
                 if not content_type.startswith("image/"):
                     REJECT_CACHE[url] = {"time": time.time()}
                     self.safe_send_bytes(415, b"Not an image", extra_headers={"Cache-Control": "no-store"})
@@ -1088,6 +1161,11 @@ class Handler(BaseHTTPRequestHandler):
                             REJECT_CACHE[url] = {"time": time.time()}
                             print("[REJECT low resolution]", url, iw, ih)
                             self.safe_send_bytes(415, b"Rejected low resolution image", extra_headers={"Cache-Control": "no-store"})
+                            return
+                        if ih > iw * 1.05:
+                            REJECT_CACHE[url] = {"time": time.time()}
+                            print("[REJECT vertical image]", url, iw, ih)
+                            self.safe_send_bytes(415, b"Rejected vertical image", extra_headers={"Cache-Control": "no-store"})
                             return
                         if image_is_probably_full_graphic_page(data):
                             REJECT_CACHE[url] = {"time": time.time()}
@@ -1110,11 +1188,10 @@ class Handler(BaseHTTPRequestHandler):
                     print("[REJECT graphic]", url)
                     self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                     return
-                if image_is_portrait_or_generic_isolated_subject(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT portrait/generic isolated]", url)
-                    self.safe_send_bytes(415, b"Rejected portrait or generic isolated subject", extra_headers={"Cache-Control": "no-store"})
-                    return
+                # Keep this filter available for testing, but do not reject every possible
+                # isolated subject at proxy time. It was shrinking the live rotation too much.
+                # Known bad portraits/graphics are still caught by URL, SVG/PNG, divider,
+                # vertical, low-res, and full-graphic rules.
                 if image_has_center_divider(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
                     print("[REJECT divider]", url)
