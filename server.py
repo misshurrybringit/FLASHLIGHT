@@ -15,6 +15,7 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
+    # BBC: keep world/regional/news feeds; exclude business/tech/science/entertainment/health.
     "https://feeds.bbci.co.uk/news/rss.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
@@ -24,12 +25,9 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
     "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
     "https://feeds.bbci.co.uk/news/uk/rss.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
-    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
-    "https://feeds.bbci.co.uk/news/health/rss.xml",
+
+    # Non-BBC: mostly world/current-events sources.
     "https://feeds.apnews.com/rss/apf-topnews",
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
@@ -41,52 +39,52 @@ SOURCE_PAGES = [
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
+    "https://apnews.com/hub/ap-top-news",
+    "https://apnews.com/hub/world-news",
+    "https://apnews.com/hub/us-news",
+    "https://apnews.com/hub/politics",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
+    "https://www.reuters.com/world/europe/",
+    "https://www.reuters.com/world/asia-pacific/",
+    "https://www.reuters.com/world/middle-east/",
+    "https://www.reuters.com/world/africa/",
+    "https://www.reuters.com/world/americas/",
     "https://www.reuters.com/pictures/",
+    "https://www.theguardian.com/world",
+    "https://www.theguardian.com/us-news",
+    "https://www.bbc.com/news/world",
 ]
 
 
 # Direct public section pages. These are scraped for image URLs because several
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
-    # AP is favored because it tends to supply more event/scene photos than BBC cards.
+    # AP: world/politics/current-events pages only. Avoid entertainment, sports, science, health, religion.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
-    "https://apnews.com/sports",
-    "https://apnews.com/science",
-    "https://apnews.com/health",
-    "https://apnews.com/climate-and-environment",
-    "https://apnews.com/religion",
-    "https://apnews.com/technology",
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
     "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/business",
-    "https://apnews.com/hub/sports",
-    "https://apnews.com/hub/entertainment",
-    "https://apnews.com/hub/science",
 
-    # Reuters public pages can be inconsistent, but these are attempted briefly.
+    # Reuters regional world pages for broader geography.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
+    "https://www.reuters.com/world/europe/",
+    "https://www.reuters.com/world/asia-pacific/",
+    "https://www.reuters.com/world/middle-east/",
+    "https://www.reuters.com/world/africa/",
+    "https://www.reuters.com/world/americas/",
     "https://www.reuters.com/pictures/",
 
-    # Extra public pages that usually expose straightforward image URLs.
+    # Extra world-news sources.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
     "https://www.npr.org/sections/news/",
+    "https://www.bbc.com/news/world",
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -113,6 +111,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "00a03cc0", "929fd780", "06449360", "f4ee5fc0",
     "cfcd74b0", "7488a0b0", "72e83b70", "acb55400",
     "5a8f0590",
+    "f055ab30",  # BBC generic/cropped image
+    "f0ccbee0",  # BBC split-face / divider-style image
     "typeshift.svg", "pileup.svg", "memoku.svg",
 ]
 
@@ -500,8 +500,8 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     images = []
     seen = set()
     start_time = time.time()
-    time_budget_seconds = 9.0
-    non_bbc_article_scrape_budget = 24
+    time_budget_seconds = 12.0
+    non_bbc_article_scrape_budget = 70
     non_bbc_article_scrapes = 0
 
     def add_image(img):
@@ -548,7 +548,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             continue
 
     # Add a first pass from direct section pages, with AP favored.
-    for img in get_direct_page_images(limit=360):
+    for img in get_direct_page_images(limit=520):
         if len(images) >= limit:
             break
         add_image(img)
@@ -556,7 +556,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     pages = SOURCE_PAGES[:]
     random.shuffle(pages)
     page_article_scrapes = 0
-    page_article_scrape_budget = 46
+    page_article_scrape_budget = 80
     for page_url in pages:
         if len(images) >= limit:
             break
@@ -564,9 +564,9 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             break
         try:
             html = fetch_text(page_url, timeout=2.5)
-            for img in extract_inline_images_from_html(html, page_url, max_images=18):
+            for img in extract_inline_images_from_html(html, page_url, max_images=36):
                 add_image(img)
-            links = extract_article_links_from_html(html, page_url, max_links=24)
+            links = extract_article_links_from_html(html, page_url, max_links=40)
             random.shuffle(links)
             for link in links:
                 if len(images) >= limit or page_article_scrapes >= page_article_scrape_budget:
@@ -955,7 +955,7 @@ function drawFlashlight() {{
   ctx.clearRect(0,0,canvas.width,canvas.height);
   ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
 
-  ctx.fillStyle = "rgba(0,0,0,0.92)";
+  ctx.fillStyle = "#000";
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
