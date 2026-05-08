@@ -15,6 +15,9 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
+    # Scene-first feeds. Removed BBC business / technology / health /
+    # entertainment / science because they often produce headshots, podiums,
+    # product shots, studio portraits, and generic cropped editorial images.
     "https://feeds.bbci.co.uk/news/rss.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
@@ -24,11 +27,7 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
     "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
     "https://feeds.bbci.co.uk/news/uk/rss.xml",
-    "https://feeds.bbci.co.uk/news/business/rss.xml",
-    "https://feeds.bbci.co.uk/news/technology/rss.xml",
-    "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
-    "https://feeds.bbci.co.uk/news/health/rss.xml",
     "https://feeds.apnews.com/rss/apf-topnews",
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
@@ -36,16 +35,16 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
+    # AP/Reuters sections that tend to return event scenes instead of generic
+    # tech/business/entertainment portrait cards.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
+    "https://apnews.com/sports",
+    "https://apnews.com/climate-and-environment",
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
     "https://www.reuters.com/pictures/",
 ]
 
@@ -54,28 +53,24 @@ SOURCE_PAGES = [
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
     # AP is favored because it tends to supply more event/scene photos than BBC cards.
+    # Removed AP business / entertainment / technology / health / science hubs because
+    # they often add generic portraits, product shots, conference panels, and crops.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
     "https://apnews.com/politics",
-    "https://apnews.com/business",
-    "https://apnews.com/entertainment",
-    "https://apnews.com/science",
-    "https://apnews.com/health",
-    "https://apnews.com/technology",
+    "https://apnews.com/sports",
+    "https://apnews.com/climate-and-environment",
+    "https://apnews.com/religion",
     "https://apnews.com/hub/ap-top-news",
     "https://apnews.com/hub/world-news",
     "https://apnews.com/hub/us-news",
     "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/business",
-    "https://apnews.com/hub/entertainment",
-    "https://apnews.com/hub/science",
+    "https://apnews.com/hub/sports",
 
     # Reuters public pages can be inconsistent, but these are attempted briefly.
     "https://www.reuters.com/world/",
     "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/technology/",
     "https://www.reuters.com/pictures/",
 
     # Extra public pages that usually expose straightforward image URLs.
@@ -108,7 +103,6 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "00a03cc0", "929fd780", "06449360", "f4ee5fc0",
     "cfcd74b0", "7488a0b0", "72e83b70", "acb55400",
     "5a8f0590",
-    "f0ccbee0",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -129,19 +123,6 @@ def url_is_vertical_only(url):
 
 def url_needs_voice_crop(url):
     return any(fragment in url for fragment in VOICE_CROP_URL_FRAGMENTS)
-
-
-ANIMAL_OR_OFF_TOPIC_URL_TOKENS = [
-    "animal", "animals", "wildlife", "zoo", "dog", "dogs", "cat", "cats",
-    "bird", "birds", "whale", "whales", "shark", "sharks", "bear", "bears",
-    "panda", "penguin", "elephant", "monkey", "gorilla", "seal", "turtle",
-    "nature", "species", "fossil", "dinosaur", "sports", "religion",
-]
-
-
-def url_has_animal_or_offtopic_token(url):
-    lower = (url or "").lower()
-    return any(token in lower for token in ANIMAL_OR_OFF_TOPIC_URL_TOKENS)
 
 
 def upgrade_bbc_image_url(url):
@@ -166,14 +147,7 @@ def clean_extracted_image_url(url):
     if not url.startswith("http"):
         return None
     lower = url.lower()
-    if lower.endswith(".svg") or ".svg?" in lower:
-        return None
-    if "apnews" in lower and (lower.endswith(".png") or ".png?" in lower):
-        return None
-    if any(bad in lower for bad in [
-        "logo", "placeholder", "blank", "sprite", "icon",
-        "typeshift", "pileup", "memoku",
-    ]):
+    if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
         return None
     return upgrade_bbc_image_url(url)
 
@@ -255,8 +229,6 @@ def extract_article_links_from_html(html, base_url, max_links=40):
             continue
         lower = link.lower()
         if any(skip in lower for skip in ["/video/", "/podcast", "/live", "signin", "subscribe", "login"]):
-            continue
-        if url_has_animal_or_offtopic_token(lower):
             continue
         if any(domain in lower for domain in ["apnews.com", "reuters.com"]):
             if len(lower.rstrip('/').split('/')) < 4:
@@ -846,9 +818,9 @@ def image_has_center_divider(data):
         dark_by_row = np.mean(dark_band, axis=1) > 0.45
         for line_by_row in (bright_by_row, dark_by_row):
             full_height_frac = float(np.mean(line_by_row))
-            if full_height_frac > 0.50:
+            if full_height_frac > 0.58:
                 return True
-            if full_height_frac > 0.34:
+            if full_height_frac > 0.42:
                 transitions = np.diff(line_by_row.astype(np.int8))
                 if int(np.sum(transitions == 1)) <= 8:
                     return True
@@ -861,29 +833,13 @@ def image_has_center_divider(data):
     divider_x = center_min + int(np.argmax(center_energy))
     peak_energy = float(col_energy[divider_x])
     baseline = float(np.median(col_energy)) + 1e-6
-    if peak_energy < baseline * 1.85:
+    if peak_energy < baseline * 2.2:
         return False
     col_slice = edge_strength[:, max(0, divider_x - 1):min(w, divider_x + 2)]
     row_strength = col_slice.mean(axis=1)
     row_baseline = float(np.median(row_strength)) + 1e-6
     strong_frac = float(np.mean(row_strength > row_baseline * 1.55))
-    if strong_frac > 0.30:
-        return True
-
-    # Catch soft split-screen / two-face composites where the divider is a
-    # vertical seam rather than a pure black/white line.
-    mid_band = gray[:, int(w * 0.46):int(w * 0.54)]
-    left_band = gray[:, int(w * 0.34):int(w * 0.44)]
-    right_band = gray[:, int(w * 0.56):int(w * 0.66)]
-    if mid_band.size and left_band.size and right_band.size:
-        mid_edge = float(np.mean(cv2.Canny(mid_band, 55, 145) > 0))
-        side_edge = (float(np.mean(cv2.Canny(left_band, 55, 145) > 0)) + float(np.mean(cv2.Canny(right_band, 55, 145) > 0))) / 2.0
-        mid_std = float(np.std(mid_band))
-        side_std = (float(np.std(left_band)) + float(np.std(right_band))) / 2.0
-        if mid_edge > max(0.050, side_edge * 1.35) and mid_std < side_std * 1.02:
-            return True
-
-    return False
+    return strong_frac > 0.38
 
 
 def render_html():
@@ -917,10 +873,8 @@ const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
 let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
-let loadingTimer = null;
-let badSrcs = new Set();
 let recentlyShown = [];
-const RECENT_LIMIT = 45;
+const RECENT_LIMIT = 80;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -940,25 +894,14 @@ function refillPool() {{
     .filter(slideAllowedForCurrentOrientation)
     .map(s => s.src)
     .filter(src => !badSrcs.has(src));
-
-  // If almost everything has failed, clear the temporary bad list once.
-  // This prevents one bad network pass from collapsing the rotation forever.
-  if (candidates.length < 8 && badSrcs.size > 0) {{
-    badSrcs.clear();
-    candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
-  }}
-
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
   let fresh = candidates.filter(src => !recentlyShown.includes(src));
-  if (fresh.length < Math.min(12, candidates.length)) fresh = candidates;
+  if (fresh.length < Math.min(8, candidates.length)) fresh = candidates;
   shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
+  console.log("rotation pool", {{ total: slides.length, usable: candidates.length, fresh: fresh.length, bad: badSrcs.size }});
 }}
-function getNextRandomSrc() {{
-  if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool();
-  if (!shuffledPool.length) return null;
-  return shuffledPool[poolIndex++];
-}}
+function getNextRandomSrc() {{ if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool(); if (!shuffledPool.length) return null; return shuffledPool[poolIndex++]; }}
 function makeImage(sourceImage) {{
   const off = document.createElement("canvas"); off.width = canvas.width; off.height = canvas.height;
   const offCtx = off.getContext("2d", {{ willReadFrequently: true }}); syncContextQuality(offCtx);
@@ -970,83 +913,58 @@ function makeImage(sourceImage) {{
   for(let i=0;i<data.length;i+=4) {{ let gray = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; gray = Math.round(gray/step)*step; data[i]=gray; data[i+1]=gray; data[i+2]=gray; data[i+3]=255; }}
   offCtx.putImageData(imageData,0,0); return off;
 }}
-function drawFallbackMessage() {{
-  // Only used before the first image arrives. Keep it simple so normal rotation never flashes.
-  if (currentPrepared) return;
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-}}
+function drawFallbackMessage() {{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height); }}
 function drawFlashlight() {{
-  if (!currentPrepared) return;
+  if (!currentPrepared) {{ return; }}
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const radius = Math.sqrt(canvas.width*canvas.width + canvas.height*canvas.height) * (isTouchDevice ? 0.13 : 0.075);
-
-  // Draw the current image first, then put a black layer over it and cut the flashlight hole.
-  // This avoids the hard clear-to-black blink that was happening on every pointer move.
   ctx.globalCompositeOperation="source-over";
-  ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
-  ctx.fillStyle="#000";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-
+  ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
   cutout.addColorStop(0.00,"rgba(255,248,190,1.00)"); cutout.addColorStop(0.20,"rgba(255,238,150,0.84)"); cutout.addColorStop(0.50,"rgba(255,220,95,0.46)"); cutout.addColorStop(0.82,"rgba(255,200,55,0.18)"); cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
   ctx.globalCompositeOperation="destination-out"; ctx.fillStyle=cutout; ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  ctx.globalCompositeOperation="destination-over";
-  ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
-
+  ctx.globalCompositeOperation="destination-over"; ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
   ctx.globalCompositeOperation="source-over";
   const warm = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius*1.12);
-  warm.addColorStop(0.00,"rgba(255,222,95,0.30)"); warm.addColorStop(0.45,"rgba(255,205,60,0.16)"); warm.addColorStop(0.85,"rgba(255,185,35,0.06)"); warm.addColorStop(1.00,"rgba(255,170,20,0.00)");
+  warm.addColorStop(0.00,"rgba(255,222,95,0.28)"); warm.addColorStop(0.45,"rgba(255,205,60,0.16)"); warm.addColorStop(0.85,"rgba(255,185,35,0.06)"); warm.addColorStop(1.00,"rgba(255,170,20,0.00)");
   ctx.fillStyle=warm; ctx.fillRect(0,0,canvas.width,canvas.height);
 }}
 function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
   recentlyShown.push(src); if (recentlyShown.length > RECENT_LIMIT) recentlyShown.shift();
   const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
-  const el = document.getElementById("debug-url"); el.textContent = rawUrl; el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
+  const usableEstimate = Math.max(0, slides.length - badSrcs.size);
+  const el = document.getElementById("debug-url"); el.textContent = rawUrl + "  [recent " + recentlyShown.length + " / usable ~" + usableEstimate + " / bad " + badSrcs.size + "]"; el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
 }}
-function finishLoadAndRetry(src, attempts, delay=45) {{
-  if (loadingTimer) {{ clearTimeout(loadingTimer); loadingTimer = null; }}
-  badSrcs.add(src);
-  shuffledPool = shuffledPool.filter(s => s !== src);
-  isLoadingSlide = false;
-  if (attempts < 90) setTimeout(() => loadRandomSlide(attempts + 1), delay);
-}}
-
 function loadRandomSlide(attempts=0) {{
-  if (isLoadingSlide) return;
-  resizeCanvas();
-  if (!slides.length || attempts > 90) {{ isLoadingSlide=false; return; }}
-
-  const src = getNextRandomSrc();
-  if (!src) {{ isLoadingSlide=false; return; }}
-
+  if (isLoadingSlide && attempts === 0) return;
   isLoadingSlide = true;
-  const loader = new Image();
-  loader.decoding = "async";
-
-  loadingTimer = setTimeout(() => {{
-    finishLoadAndRetry(src, attempts, 60);
-  }}, 2800);
-
-  loader.onload = () => {{
-    if (loadingTimer) {{ clearTimeout(loadingTimer); loadingTimer = null; }}
-
-    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{
-      finishLoadAndRetry(src, attempts, 45);
-      return;
-    }}
-
-    prepareAndDraw(loader, src);
+  resizeCanvas();
+  if (!slides.length || attempts > 90) {{
+    if (badSrcs.size > Math.max(35, slides.length * 0.45)) {{ badSrcs.clear(); refillPool(); }}
     isLoadingSlide = false;
+    return;
+  }}
+  const src = getNextRandomSrc();
+  if (!src) {{ isLoadingSlide=false; setTimeout(() => {{ refillPool(); loadRandomSlide(attempts+1); }}, 80); return; }}
+  const loader = new Image(); loader.decoding = "async";
+  let finished = false;
+  const finish = (worked, markBad=true) => {{
+    if (finished) return;
+    finished = true;
+    clearTimeout(loadTimer);
+    isLoadingSlide = false;
+    if (!worked) {{
+      if (markBad) {{ badSrcs.add(src); shuffledPool = shuffledPool.filter(s => s !== src); }}
+      setTimeout(() => loadRandomSlide(attempts+1), 35);
+    }}
   }};
-
-  loader.onerror = () => {{
-    finishLoadAndRetry(src, attempts, 45);
+  const loadTimer = setTimeout(() => {{ console.log("slow image skipped", src); finish(false, false); }}, 6000);
+  loader.onload = () => {{
+    if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{ finish(false, true); return; }}
+    prepareAndDraw(loader, src); finish(true);
   }};
-
+  loader.onerror = () => {{ finish(false, true); }};
   loader.src = src;
 }}
 function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; drawFlashlight(); }}
@@ -1054,8 +972,7 @@ canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
-resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide();
-setTimeout(function rotate() {{
+resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide(); setTimeout(function rotate() {{
   loadRandomSlide();
   setTimeout(rotate, 5000);
 }}, 5000);
