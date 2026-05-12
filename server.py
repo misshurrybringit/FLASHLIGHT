@@ -715,9 +715,6 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
 def _background_pool_refresher():
     """Continuously rebuild the image pool so the cache is always warm."""
-    # Initial delay so the server starts fast and handles the first request
-    # before spending time on the expensive crawl.
-    time.sleep(4)
     while True:
         try:
             print("[BG] Refreshing image pool …")
@@ -1007,9 +1004,14 @@ def image_has_center_divider(data):
 
 
 def render_html():
-    images = get_bbc_images(limit=MAX_IMAGE_POOL)
+    # Serve the page immediately with whatever is already cached — or empty if
+    # the background thread hasn't finished its first crawl yet.  The client
+    # will poll /images.json after 2 s and populate the slide pool without
+    # ever blocking this response.
+    with IMAGE_CACHE["lock"]:
+        cached = IMAGE_CACHE["images"][:]
     sequence = []
-    for img in images:
+    for img in cached:
         proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
         sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
     sequence_json = json.dumps(sequence)
@@ -1154,23 +1156,30 @@ canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
-resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); loadRandomSlide();
+resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool();
+
+// Keep trying to load a slide every second until we have one, then hand off
+// to the normal 5 s rotation timer.
+(function tryLoad() {{
+  if (!currentImage) {{
+    loadRandomSlide();
+    setTimeout(tryLoad, 1000);
+  }}
+}})();
 setTimeout(function rotateSlides() {{
   loadRandomSlide();
   setTimeout(rotateSlides, 5000);
 }}, 5000);
 
-// Poll the server every 30 s for a refreshed image list so the pool never
-// runs dry even if the server found only a handful of images at first load.
+// Poll /images.json quickly on first load (2 s) so the pool fills even if
+// the server had nothing cached yet, then every 30 s after that.
 (function pollImages() {{
-  setTimeout(async function refresh() {{
+  async function refresh() {{
     try {{
       const r = await fetch("/images.json");
       if (r.ok) {{
         const fresh = await r.json();
-        if (fresh && fresh.length > slides.length * 0.8) {{
-          // Merge: add any new src keys; don't remove existing ones (avoids
-          // flickering if a URL was transiently unavailable).
+        if (fresh && fresh.length > 0) {{
           const existingKeys = new Set(slides.map(s => s.src));
           let added = 0;
           for (const item of fresh) {{
@@ -1182,12 +1191,14 @@ setTimeout(function rotateSlides() {{
           }}
           if (added > 0) {{
             refillPool();
+            if (!currentImage) loadRandomSlide();
           }}
         }}
       }}
     }} catch(e) {{ /* network blip — ignore */ }}
     setTimeout(refresh, 30000);
-  }}, 30000);
+  }}
+  setTimeout(refresh, 2000);
 }})();
 </script>
 </body>
