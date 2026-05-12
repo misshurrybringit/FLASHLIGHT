@@ -126,6 +126,11 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "cfcd74b0", "7488a0b0", "72e83b70", "acb55400",
     "5a8f0590",
     "3a45b6139f0e4811b83b67069b3ba3f8",
+    "5d8ee630ae7547f484839522c5309acd",
+    "412719e44ad6a73780cf389a229b",
+    "be77c61645479209fe360b0dfc79",
+    "0e6e82f4ed2b66a75b5c6beb62b2",
+    "bb93630408c744d6b8c58db130e5743f",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -176,6 +181,15 @@ def clean_extracted_image_url(url):
     # Reject SVG files — these are almost always AP/Reuters infographics/maps.
     if lower.endswith(".svg") or ".svg?" in lower:
         return None
+    # PNG inner assets from AP are almost always graphics/illustrations, not photos.
+    if "assets.apnews.com" in lower and lower.endswith(".png"):
+        return None
+    # AP /projects/ URLs are always graphics/interactives, never photos.
+    if "apnews.com/projects/" in lower:
+        return None
+        inner = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("url", [""])[0]
+        if inner.lower().endswith(".png"):
+            return None
     # Reject AP graphic asset URLs: assets.apnews.com with short filenames
     # (real photos have long content-hash filenames; graphics like typeshift.svg are short).
     if "assets.apnews.com" in lower and "dims.apnews.com" not in lower:
@@ -409,9 +423,11 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "npr.brightspotcdn.com",
             ".jpg",
             ".jpeg",
-            ".png",
             ".webp",
         ]):
+            return False
+        # Block AP project/social graphics that sneak through on .jpg/.webp extension.
+        if "apnews.com" in lower and any(bad in lower for bad in ["/projects/", "/social/", "/interactives/"]):
             return False
 
         key = normalize_image_url_for_dedupe(img)
