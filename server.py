@@ -4,9 +4,11 @@ import random
 import re
 import socket
 import time
+import threading
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cv2
@@ -103,8 +105,9 @@ HEADERS = {
 
 MAX_IMAGE_POOL = 1900
 SEQUENCE_LENGTH = 1600
-IMAGE_CACHE = {"time": 0, "images": []}
+IMAGE_CACHE = {"time": 0, "images": [], "lock": threading.Lock()}
 CACHE_SECONDS = 60
+BACKGROUND_REFRESH_SECONDS = 45  # pre-warm interval
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 300
@@ -169,6 +172,19 @@ def clean_extracted_image_url(url):
     lower = url.lower()
     if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
         return None
+    # Reject SVG files — these are almost always AP/Reuters infographics/maps.
+    if lower.endswith(".svg") or ".svg?" in lower:
+        return None
+    # Reject AP graphic asset URLs: assets.apnews.com with short filenames
+    # (real photos have long content-hash filenames; graphics like typeshift.svg are short).
+    if "assets.apnews.com" in lower and "dims.apnews.com" not in lower:
+        path_parts = urllib.parse.urlparse(url).path.strip("/").split("/")
+        fname = path_parts[-1] if path_parts else ""
+        # Real AP photo filenames are long hex hashes (30+ chars before extension).
+        # Graphic/game filenames are short words. Reject short ones.
+        stem = fname.split(".")[0]
+        if len(stem) < 20:
+            return None
     return upgrade_bbc_image_url(url)
 
 
@@ -439,26 +455,34 @@ def extract_image_urls_from_html(html, base_url, limit=80):
 
     return found[:limit]
 
+def _scrape_one_page(page_url):
+    """Fetch a section page and return (section_images, article_links)."""
+    is_ap = "apnews.com" in page_url
+    timeout = 3.5 if is_ap else 2.8
+    try:
+        html = fetch_text(page_url, timeout=timeout)
+        imgs = extract_image_urls_from_html(html, page_url, limit=170 if is_ap else 55)
+        links = extract_article_links_from_html(html, page_url, max_links=80 if is_ap else 22)
+        return imgs, links
+    except Exception:
+        return [], []
+
+
+def _scrape_one_article(args):
+    """Fetch a single article page and return its image URLs."""
+    link, is_ap = args
+    timeout = 3.0 if is_ap else 2.4
+    try:
+        html = fetch_text(link, timeout=timeout)
+        imgs = extract_image_urls_from_html(html, link, limit=12 if is_ap else 5)
+        return imgs[:6 if is_ap else 3]
+    except Exception:
+        return []
+
+
 def get_direct_page_images(limit=560):
     images = []
     seen = set()
-    pages = DIRECT_IMAGE_PAGES[:]
-
-    # AP gets its own larger crawl because AP's useful photos usually appear on
-    # article pages / JSON blobs, not in a simple RSS image field.
-    ap_pages = [p for p in pages if "apnews.com" in p]
-    other_pages = [p for p in pages if "apnews.com" not in p]
-    random.shuffle(ap_pages)
-    random.shuffle(other_pages)
-    pages = ap_pages + other_pages
-
-    start_time = time.time()
-    ap_page_budget_seconds = 14.0
-    other_page_budget_seconds = 5.0
-    ap_article_scrape_budget = 180
-    other_article_scrape_budget = 30
-    ap_article_scrapes = 0
-    other_article_scrapes = 0
 
     def add_candidate(img):
         if not img:
@@ -473,62 +497,52 @@ def get_direct_page_images(limit=560):
         images.append(img)
         return True
 
-    for page_url in pages:
-        is_ap = "apnews.com" in page_url
-        if len(images) >= limit:
-            break
-        elapsed = time.time() - start_time
-        if is_ap:
-            if elapsed > ap_page_budget_seconds and images:
-                continue
-        else:
-            if elapsed > ap_page_budget_seconds + other_page_budget_seconds and images:
+    pages = DIRECT_IMAGE_PAGES[:]
+    ap_pages = [p for p in pages if "apnews.com" in p]
+    other_pages = [p for p in pages if "apnews.com" not in p]
+    random.shuffle(ap_pages)
+    random.shuffle(other_pages)
+    all_pages = ap_pages + other_pages
+
+    # Phase 1: fetch all section pages in parallel (up to 14 workers).
+    article_links = []  # list of (link, is_ap)
+    with ThreadPoolExecutor(max_workers=14) as ex:
+        futures = {ex.submit(_scrape_one_page, p): p for p in all_pages}
+        for fut in as_completed(futures):
+            page_url = futures[fut]
+            is_ap = "apnews.com" in page_url
+            try:
+                imgs, links = fut.result()
+                random.shuffle(imgs)
+                for img in imgs:
+                    add_candidate(img)
+                for link in links:
+                    article_links.append((link, is_ap))
+            except Exception:
+                pass
+
+    if len(images) >= limit:
+        return images[:limit]
+
+    # Phase 2: scrape article pages in parallel (up to 20 workers).
+    # Cap per-source article scrapes to stay balanced.
+    ap_links = [(l, True) for (l, a) in article_links if a][:160]
+    other_links = [(l, False) for (l, a) in article_links if not a][:40]
+    random.shuffle(ap_links)
+    random.shuffle(other_links)
+    combined = ap_links + other_links
+
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        futures = [ex.submit(_scrape_one_article, args) for args in combined]
+        for fut in as_completed(futures):
+            if len(images) >= limit:
                 break
+            try:
+                for img in fut.result():
+                    add_candidate(img)
+            except Exception:
+                pass
 
-        try:
-            html = fetch_text(page_url, timeout=3.2 if is_ap else 2.4)
-
-            # Inline/JSON images from section pages.
-            candidates = extract_image_urls_from_html(html, page_url, limit=170 if is_ap else 55)
-            # Keep AP early in the final list; shuffle within source so it still feels live.
-            random.shuffle(candidates)
-            for img in candidates:
-                add_candidate(img)
-                if len(images) >= limit:
-                    break
-
-            links = extract_article_links_from_html(
-                html,
-                page_url,
-                max_links=120 if is_ap else 22,
-            )
-            random.shuffle(links)
-            for link in links:
-                if len(images) >= limit:
-                    break
-                if is_ap:
-                    if ap_article_scrapes >= ap_article_scrape_budget:
-                        break
-                    ap_article_scrapes += 1
-                else:
-                    if other_article_scrapes >= other_article_scrape_budget:
-                        break
-                    other_article_scrapes += 1
-                try:
-                    article_html = fetch_text(link, timeout=2.8 if is_ap else 2.2)
-                    article_imgs = extract_image_urls_from_html(article_html, link, limit=18 if is_ap else 5)
-                    for img in article_imgs[:8 if is_ap else 3]:
-                        add_candidate(img)
-                        if len(images) >= limit:
-                            break
-                except Exception:
-                    continue
-
-        except Exception:
-            continue
-
-    # Do not shuffle the entire result: AP pages were intentionally crawled first,
-    # so keeping this order gives AP more representation in the first rendered pool.
     return images[:limit]
 
 def extract_image_from_html_page(url):
@@ -594,10 +608,11 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
 
 def get_bbc_images(limit=MAX_IMAGE_POOL):
     now = time.time()
-    if IMAGE_CACHE["images"] and now - IMAGE_CACHE["time"] < CACHE_SECONDS:
-        cached = IMAGE_CACHE["images"][:]
-        random.shuffle(cached)
-        return cached[:limit]
+    with IMAGE_CACHE["lock"]:
+        if IMAGE_CACHE["images"] and now - IMAGE_CACHE["time"] < CACHE_SECONDS:
+            cached = IMAGE_CACHE["images"][:]
+            random.shuffle(cached)
+            return cached[:limit]
 
     images = []
     seen = set()
@@ -692,9 +707,26 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
     ordered = weighted_image_mix(images, limit=limit)
 
-    IMAGE_CACHE["time"] = now
-    IMAGE_CACHE["images"] = ordered[:]
+    with IMAGE_CACHE["lock"]:
+        IMAGE_CACHE["time"] = now
+        IMAGE_CACHE["images"] = ordered[:]
     return ordered[:limit]
+
+
+def _background_pool_refresher():
+    """Continuously rebuild the image pool so the cache is always warm."""
+    # Initial delay so the server starts fast and handles the first request
+    # before spending time on the expensive crawl.
+    time.sleep(4)
+    while True:
+        try:
+            print("[BG] Refreshing image pool …")
+            t0 = time.time()
+            images = get_bbc_images(limit=MAX_IMAGE_POOL)
+            print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s")
+        except Exception as e:
+            print("[BG] Refresh error:", e)
+        time.sleep(BACKGROUND_REFRESH_SECONDS)
 
 
 def image_is_probably_full_graphic_page(data):
@@ -1127,6 +1159,36 @@ setTimeout(function rotateSlides() {{
   loadRandomSlide();
   setTimeout(rotateSlides, 5000);
 }}, 5000);
+
+// Poll the server every 30 s for a refreshed image list so the pool never
+// runs dry even if the server found only a handful of images at first load.
+(function pollImages() {{
+  setTimeout(async function refresh() {{
+    try {{
+      const r = await fetch("/images.json");
+      if (r.ok) {{
+        const fresh = await r.json();
+        if (fresh && fresh.length > slides.length * 0.8) {{
+          // Merge: add any new src keys; don't remove existing ones (avoids
+          // flickering if a URL was transiently unavailable).
+          const existingKeys = new Set(slides.map(s => s.src));
+          let added = 0;
+          for (const item of fresh) {{
+            if (!existingKeys.has(item.src)) {{
+              slides.push(item);
+              existingKeys.add(item.src);
+              added++;
+            }}
+          }}
+          if (added > 0) {{
+            refillPool();
+          }}
+        }}
+      }}
+    }} catch(e) {{ /* network blip — ignore */ }}
+    setTimeout(refresh, 30000);
+  }}, 30000);
+}})();
 </script>
 </body>
 </html>'''
@@ -1164,6 +1226,16 @@ class Handler(BaseHTTPRequestHandler):
         if path in ["/", "/index.html"]:
             data = render_html().encode("utf-8")
             self.safe_send_bytes(200, data, "text/html; charset=utf-8", {"Cache-Control": "no-store"})
+            return
+
+        if path == "/images.json":
+            images = get_bbc_images(limit=MAX_IMAGE_POOL)
+            sequence = []
+            for img in images:
+                proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
+                sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
+            data = json.dumps(sequence).encode("utf-8")
+            self.safe_send_bytes(200, data, "application/json; charset=utf-8", {"Cache-Control": "no-store"})
             return
 
         if path == "/sources.json":
@@ -1271,4 +1343,6 @@ if __name__ == "__main__":
     print("Low-res rejection: ON")
     print(f"Serving at http://localhost:{PORT}")
     print()
+    bg = threading.Thread(target=_background_pool_refresher, daemon=True)
+    bg.start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
