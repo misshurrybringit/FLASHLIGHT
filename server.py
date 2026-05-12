@@ -17,20 +17,19 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
-    # BBC world/regional feeds: broad geography, fewer feature/tech/entertainment images.
-    "https://feeds.bbci.co.uk/news/rss.xml",
+    # BBC: just top-level world and in_pictures — these turn over faster than regional feeds.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
-    "https://feeds.bbci.co.uk/news/world/europe/rss.xml",
-    "https://feeds.bbci.co.uk/news/world/asia/rss.xml",
-    "https://feeds.bbci.co.uk/news/world/africa/rss.xml",
-    "https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",
-    "https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
-    "https://feeds.bbci.co.uk/news/uk/rss.xml",
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
+    "https://feeds.bbci.co.uk/news/rss.xml",
 
-    # Non-BBC sources that often provide wider scene photos.
+    # AP feeds — update constantly, reliable image URLs in RSS.
     "https://feeds.apnews.com/rss/apf-topnews",
+    "https://feeds.apnews.com/rss/apf-WorldNews",
+    "https://feeds.apnews.com/rss/apf-usnews",
+    "https://feeds.apnews.com/rss/apf-politics",
+    "https://feeds.apnews.com/rss/apf-intlnews",
+
+    # Guardian and NPR.
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
     "https://www.npr.org/rss/rss.php?id=1001",
@@ -126,11 +125,13 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "00a03cc0", "929fd780", "06449360", "f4ee5fc0",
     "cfcd74b0", "7488a0b0", "72e83b70", "acb55400",
     "5a8f0590",
+    "3a45b6139f0e4811b83b67069b3ba3f8",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
     "166137e0", "9a3df7e0", "b1e9ef60", "843ef730",
     "7b23ccb0", "c022fa90", "679152b0", "3600d2f0",
+    "ce4b17d0",
 ]
 
 VOICE_CROP_URL_FRAGMENTS = ["f16b6b80"]
@@ -420,6 +421,19 @@ def extract_image_urls_from_html(html, base_url, limit=80):
         found.append(img)
         return True
 
+    # AP/Next.js pages embed all data in __NEXT_DATA__. Parse it first since
+    # it's the most reliable source of dims.apnews.com URLs on AP pages.
+    next_data_match = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL | re.IGNORECASE)
+    if next_data_match:
+        try:
+            blob = html_unescape_js_urls(next_data_match.group(1))
+            for m in re.finditer(r'https://dims\.apnews\.com/[^"\'\s<>\\]+', blob):
+                add_raw(m.group(0).rstrip('.,;)}]"\''))
+                if len(found) >= limit:
+                    return found[:limit]
+        except Exception:
+            pass
+
     patterns = [
         r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
         r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
@@ -585,12 +599,12 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     # Keep this intentionally AP-heavy. If AP returns fewer images, the other
     # buckets fill the rest without causing errors.
     mixed = (
-        buckets["ap"][:420]
-        + buckets["reuters"][:220]
-        + buckets["guardian"][:140]
-        + buckets["npr"][:80]
-        + buckets["other"][:80]
-        + buckets["bbc"][:360]
+        buckets["ap"][:600]
+        + buckets["reuters"][:300]
+        + buckets["guardian"][:200]
+        + buckets["npr"][:120]
+        + buckets["other"][:100]
+        + buckets["bbc"][:60]
     )
 
     remaining = []
@@ -621,8 +635,8 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     non_bbc_article_scrape_budget = 120
     non_bbc_article_scrapes = 0
     bbc_added = 0
-    # Cap BBC so AP/Reuters/Guardian/NPR are not drowned out whenever BBC feeds are fast.
-    max_bbc_images = int(limit * 0.34)
+    # Cap BBC so AP/Reuters/Guardian/NPR dominate the pool.
+    max_bbc_images = int(limit * 0.06)
 
     def add_image(img):
         if not img:
@@ -1171,8 +1185,8 @@ setTimeout(function rotateSlides() {{
   setTimeout(rotateSlides, 5000);
 }}, 5000);
 
-// Poll /images.json quickly on first load (2 s) so the pool fills even if
-// the server had nothing cached yet, then every 30 s after that.
+// Poll /images.json — first attempt after 8 s (gives background thread time
+// to finish its first crawl), then every 30 s. If still empty, retry sooner.
 (function pollImages() {{
   async function refresh() {{
     try {{
@@ -1193,12 +1207,17 @@ setTimeout(function rotateSlides() {{
             refillPool();
             if (!currentImage) loadRandomSlide();
           }}
+          setTimeout(refresh, 30000);
+        }} else {{
+          // Cache still empty — retry in 4 s
+          setTimeout(refresh, 4000);
         }}
+      }} else {{
+        setTimeout(refresh, 4000);
       }}
-    }} catch(e) {{ /* network blip — ignore */ }}
-    setTimeout(refresh, 30000);
+    }} catch(e) {{ setTimeout(refresh, 4000); }}
   }}
-  setTimeout(refresh, 2000);
+  setTimeout(refresh, 8000);
 }})();
 </script>
 </body>
@@ -1240,9 +1259,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/images.json":
-            images = get_bbc_images(limit=MAX_IMAGE_POOL)
+            with IMAGE_CACHE["lock"]:
+                cached = IMAGE_CACHE["images"][:]
             sequence = []
-            for img in images:
+            for img in cached:
                 proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
                 sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
             data = json.dumps(sequence).encode("utf-8")
