@@ -1128,7 +1128,7 @@ function loadRandomSlide(attempts=0) {{
   if (isLoadingSlide) return;
   isLoadingSlide = true;
 
-  if (!slides.length || attempts > 120) {{
+  if (!slides.length || attempts > 400) {{
     isLoadingSlide = false;
     return;
   }}
@@ -1324,11 +1324,6 @@ class Handler(BaseHTTPRequestHandler):
                             print("[REJECT low resolution]", url, iw, ih)
                             self.safe_send_bytes(415, b"Rejected low resolution image", extra_headers={"Cache-Control": "no-store"})
                             return
-                        if image_is_probably_full_graphic_page(data):
-                            REJECT_CACHE[url] = {"time": time.time()}
-                            print("[REJECT graphic pre-crop]", url)
-                            self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
-                            return
                         cropped, did_crop = crop_top_if_needed(img, url)
                         if cropped is not None and cropped.size > 0:
                             ok, encoded = cv2.imencode(".jpg", cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
@@ -1340,21 +1335,6 @@ class Handler(BaseHTTPRequestHandler):
                                     print("[CROP top]", url)
                 except Exception:
                     test_data = data
-                if image_is_probably_full_graphic_page(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT graphic]", url)
-                    self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
-                    return
-                if image_is_portrait_or_generic_isolated_subject(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT portrait/generic isolated]", url)
-                    self.safe_send_bytes(415, b"Rejected portrait or generic isolated subject", extra_headers={"Cache-Control": "no-store"})
-                    return
-                if image_has_center_divider(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT divider]", url)
-                    self.safe_send_bytes(415, b"Rejected center divider", extra_headers={"Cache-Control": "no-store"})
-                    return
                 print("[SERVE]", url)
                 PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
                 self.safe_send_bytes(200, data, content_type, {"Cache-Control": "public, max-age=300"})
