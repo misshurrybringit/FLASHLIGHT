@@ -131,6 +131,10 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "be77c61645479209fe360b0dfc79",
     "0e6e82f4ed2b66a75b5c6beb62b2",
     "bb93630408c744d6b8c58db130e5743f",
+    "8222aecb2bf94a39b6f80b1efde09e2c",
+    "facebook-default-wide",
+    "a0b3c0e01f2f4a38802002a69e896fd5",
+    "b713f599330d4bb490048b117f0b3dcc",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -428,6 +432,9 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             return False
         # Block AP project/social graphics that sneak through on .jpg/.webp extension.
         if "apnews.com" in lower and any(bad in lower for bad in ["/projects/", "/social/", "/interactives/"]):
+            return False
+        # media.npr.org is NPR's placeholder/logo domain — real NPR photos use brightspotcdn.
+        if "media.npr.org" in lower:
             return False
 
         key = normalize_image_url_for_dedupe(img)
