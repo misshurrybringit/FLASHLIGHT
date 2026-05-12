@@ -29,10 +29,9 @@ RSS_FEEDS = [
     "https://feeds.apnews.com/rss/apf-politics",
     "https://feeds.apnews.com/rss/apf-intlnews",
 
-    # Guardian and NPR.
+    # Guardian.
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
-    "https://www.npr.org/rss/rss.php?id=1001",
 ]
 
 SOURCE_PAGES = [
@@ -90,10 +89,9 @@ DIRECT_IMAGE_PAGES = [
     "https://www.reuters.com/world/africa/",
     "https://www.reuters.com/pictures/",
 
-    # Guardian/NPR world news.
+    # Guardian world news.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
-    "https://www.npr.org/sections/news/",
 ]
 
 HEADERS = {
@@ -135,6 +133,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "facebook-default-wide",
     "a0b3c0e01f2f4a38802002a69e896fd5",
     "b713f599330d4bb490048b117f0b3dcc",
+    "965f7a604adc96b5f4fe201c77c8",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -436,6 +435,12 @@ def extract_image_urls_from_html(html, base_url, limit=80):
         # media.npr.org is NPR's placeholder/logo domain — real NPR photos use brightspotcdn.
         if "media.npr.org" in lower:
             return False
+        # NPR brightspotcdn URLs with non-news filenames (games, puzzles, podcasts etc).
+        if "brightspotcdn" in lower and any(bad in lower for bad in [
+            "games-we-love", "podcast", "music", "puzzle", "quiz", "crossword",
+            "default-wide", "placeholder", "share-image", "shareimage",
+        ]):
+            return False
 
         key = normalize_image_url_for_dedupe(img)
         if not key or key in seen:
@@ -622,10 +627,9 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     # Keep this intentionally AP-heavy. If AP returns fewer images, the other
     # buckets fill the rest without causing errors.
     mixed = (
-        buckets["ap"][:600]
-        + buckets["reuters"][:300]
-        + buckets["guardian"][:200]
-        + buckets["npr"][:120]
+        buckets["ap"][:700]
+        + buckets["reuters"][:350]
+        + buckets["guardian"][:250]
         + buckets["other"][:100]
         + buckets["bbc"][:60]
     )
