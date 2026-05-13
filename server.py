@@ -616,6 +616,9 @@ AP_HUB_SLUGS = [
     "climate-and-environment", "disasters", "photos",
     "immigration", "china", "india", "iran", "mexico",
 ]
+
+
+def get_direct_page_images(limit=560):
     images = []
     seen = set()
 
