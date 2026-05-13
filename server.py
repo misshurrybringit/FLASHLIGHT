@@ -125,15 +125,15 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-MAX_IMAGE_POOL = 1900
-SEQUENCE_LENGTH = 1600
+MAX_IMAGE_POOL = 600
+SEQUENCE_LENGTH = 500
 IMAGE_CACHE = {"time": 0, "images": [], "lock": threading.Lock()}
-CACHE_SECONDS = 60
-BACKGROUND_REFRESH_SECONDS = 45  # pre-warm interval
+CACHE_SECONDS = 120
+BACKGROUND_REFRESH_SECONDS = 120  # pre-warm interval
 
 PROXY_CACHE = {}
-PROXY_CACHE_SECONDS = 300
-PROXY_CACHE_MAX_ITEMS = 700
+PROXY_CACHE_SECONDS = 120
+PROXY_CACHE_MAX_ITEMS = 80
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -579,9 +579,9 @@ def get_direct_page_images(limit=560):
     random.shuffle(other_pages)
     all_pages = ap_pages + other_pages
 
-    # Phase 1: fetch all section pages in parallel (up to 14 workers).
+    # Phase 1: fetch all section pages in parallel (up to 6 workers).
     article_links = []  # list of (link, is_ap)
-    with ThreadPoolExecutor(max_workers=14) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         futures = {ex.submit(_scrape_one_page, p): p for p in all_pages}
         for fut in as_completed(futures):
             page_url = futures[fut]
@@ -599,15 +599,14 @@ def get_direct_page_images(limit=560):
     if len(images) >= limit:
         return images[:limit]
 
-    # Phase 2: scrape article pages in parallel (up to 20 workers).
-    # Cap per-source article scrapes to stay balanced.
-    ap_links = [(l, True) for (l, a) in article_links if a][:160]
-    other_links = [(l, False) for (l, a) in article_links if not a][:40]
+    # Phase 2: scrape article pages in parallel (up to 8 workers).
+    ap_links = [(l, True) for (l, a) in article_links if a][:60]
+    other_links = [(l, False) for (l, a) in article_links if not a][:20]
     random.shuffle(ap_links)
     random.shuffle(other_links)
     combined = ap_links + other_links
 
-    with ThreadPoolExecutor(max_workers=20) as ex:
+    with ThreadPoolExecutor(max_workers=8) as ex:
         futures = [ex.submit(_scrape_one_article, args) for args in combined]
         for fut in as_completed(futures):
             if len(images) >= limit:
@@ -690,9 +689,9 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
     images = []
     seen = set()
-    non_bbc_article_scrape_budget = 120
+    non_bbc_article_scrape_budget = 40
     bbc_added = 0
-    page_article_scrape_budget = 90
+    page_article_scrape_budget = 30
     max_bbc_images = int(limit * 0.06)
 
     def add_image(img):
@@ -742,7 +741,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         return found
 
     feeds = RSS_FEEDS[:]
-    with ThreadPoolExecutor(max_workers=16) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         feed_futures = {ex.submit(fetch_one_feed, f): f for f in feeds}
         article_links_to_scrape = []
         for fut in as_completed(feed_futures):
@@ -762,7 +761,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
     # Scrape article pages from RSS that had no inline image, in parallel.
     random.shuffle(article_links_to_scrape)
-    with ThreadPoolExecutor(max_workers=20) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         article_futures = [ex.submit(extract_image_from_html_page, l)
                           for l in article_links_to_scrape[:non_bbc_article_scrape_budget]]
         for fut in as_completed(article_futures):
@@ -785,7 +784,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     pages = SOURCE_PAGES[:]
     random.shuffle(pages)
     all_article_links = []
-    with ThreadPoolExecutor(max_workers=14) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         page_futures = {ex.submit(scrape_source_page, p): p for p in pages}
         for fut in as_completed(page_futures):
             try:
@@ -797,7 +796,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                 pass
 
     random.shuffle(all_article_links)
-    with ThreadPoolExecutor(max_workers=20) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         art_futures = [ex.submit(extract_image_from_html_page, l)
                       for l in all_article_links[:page_article_scrape_budget]]
         for fut in as_completed(art_futures):
