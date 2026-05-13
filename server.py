@@ -22,7 +22,7 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
 
-    # AP feeds — update constantly, reliable image URLs in RSS.
+    # AP feeds — world/politics/news only, no entertainment or sports.
     "https://feeds.apnews.com/rss/apf-topnews",
     "https://feeds.apnews.com/rss/apf-WorldNews",
     "https://feeds.apnews.com/rss/apf-usnews",
@@ -177,6 +177,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "d37c3f215c3a40c9bb9c37c6e2e6bdd5",
     "4885843ae10b48aa9c1f8de09b6b1f86",
     "f18450782e9244acbe1c080840e9ab7a",
+    "af6c0ee0",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -227,7 +228,16 @@ def clean_extracted_image_url(url):
     # Reject SVG files — these are almost always AP/Reuters infographics/maps.
     if lower.endswith(".svg") or ".svg?" in lower:
         return None
-    # PNG inner assets from AP are almost always graphics/illustrations, not photos.
+    # Reject sports and entertainment images by filename keywords.
+    sports_entertainment_terms = [
+        "nba", "nfl", "nhl", "mlb", "nascar", "soccer", "football", "basketball",
+        "baseball", "hockey", "tennis", "golf", "olympics", "superbowl", "super-bowl",
+        "grammy", "oscar", "emmy", "bafta", "cannes", "eurovision", "celebrity",
+        "kardashian", "taylor-swift", "beyonce", "movie-poster", "film-poster",
+    ]
+    fname_lower = urllib.parse.urlparse(url).path.lower()
+    if any(t in fname_lower for t in sports_entertainment_terms):
+        return None
     if "assets.apnews.com" in lower and lower.endswith(".png"):
         return None
     # AP /projects/ URLs are always graphics/interactives, never photos.
@@ -569,7 +579,43 @@ def _scrape_one_article(args):
         return []
 
 
-def get_direct_page_images(limit=560):
+def fetch_ap_hub_images(hub_slug, limit=40):
+    """Fetch images from AP's content API for a given hub slug."""
+    images = []
+    try:
+        url = f"https://apnews.com/hub/{hub_slug}?contentType=hub&format=json"
+        data = fetch_text(url, timeout=5)
+        blob = json.loads(data)
+        # AP JSON structure: data.contents[].media[].imageMimeType / imageUri
+        contents = blob.get("data", {}).get("contents", [])
+        for item in contents:
+            for media in item.get("media", []):
+                uri = media.get("imageUri") or media.get("uri") or ""
+                if uri and "dims.apnews.com" in uri:
+                    cleaned = clean_extracted_image_url(uri)
+                    if cleaned and not url_is_known_bad(cleaned):
+                        images.append(cleaned)
+                        if len(images) >= limit:
+                            return images
+            # Also check leadPhoto
+            lead = item.get("leadPhoto", {})
+            uri = lead.get("imageUri") or lead.get("uri") or ""
+            if uri and "dims.apnews.com" in uri:
+                cleaned = clean_extracted_image_url(uri)
+                if cleaned and not url_is_known_bad(cleaned):
+                    images.append(cleaned)
+    except Exception:
+        pass
+    return images
+
+
+AP_HUB_SLUGS = [
+    "ap-top-news", "world-news", "us-news", "politics",
+    "middle-east", "europe", "africa", "latin-america",
+    "asia-pacific", "russia-ukraine", "israel-hamas-war",
+    "climate-and-environment", "disasters", "photos",
+    "immigration", "china", "india", "iran", "mexico",
+]
     images = []
     seen = set()
 
@@ -730,6 +776,21 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             break
         add_image(img)
 
+    # Try AP's JSON content API first — most reliable source of dims URLs.
+    def fetch_hub(slug):
+        return fetch_ap_hub_images(slug, limit=40)
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        hub_futures = {ex.submit(fetch_hub, slug): slug for slug in AP_HUB_SLUGS}
+        for fut in as_completed(hub_futures):
+            try:
+                for img in fut.result():
+                    add_image(img)
+            except Exception:
+                pass
+
+    print(f"[BG] After AP JSON API: {len(images)} images")
+
     def fetch_one_feed(feed_url):
         """Fetch one RSS feed and return list of image URLs found."""
         found = []
@@ -844,7 +905,7 @@ def _background_pool_refresher():
 
 def _pre_vet_one(url):
     """Fetch and size-check one image; add to APPROVED_URLS if it passes."""
-    if url in APPROVED_URLS or url in REJECT_CACHE:
+    if url in APPROVED_URLS:
         return
     try:
         data, content_type = fetch_bytes(url, timeout=8)
@@ -872,9 +933,10 @@ def _pre_vet_one(url):
 
 def _pre_vet_pool(images):
     """Pre-vet all images in the pool in the background using a thread pool."""
-    to_vet = [u for u in images if u not in APPROVED_URLS and u not in REJECT_CACHE]
-    if not to_vet:
-        return
+    # Clear stale rejections from previous (more aggressive) cv2 runs.
+    REJECT_CACHE.clear()
+    APPROVED_URLS.clear()
+    to_vet = images[:]
     print(f"[BG] Pre-vetting {len(to_vet)} images …")
     with ThreadPoolExecutor(max_workers=6) as ex:
         list(ex.map(_pre_vet_one, to_vet))
