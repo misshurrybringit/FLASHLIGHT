@@ -134,6 +134,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "a0b3c0e01f2f4a38802002a69e896fd5",
     "b713f599330d4bb490048b117f0b3dcc",
     "965f7a604adc96b5f4fe201c77c8",
+    "f71df60c287b45bdb8f6e93cf9b1ca2b",
+    "d37c3f215c3a40c9bb9c37c6e2e6bdd5",
+    "4885843ae10b48aa9c1f8de09b6b1f86",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1080,7 +1083,6 @@ let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
-let badSrcs = new Set();
 const RECENT_LIMIT = 90;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
@@ -1096,17 +1098,18 @@ function fitCover(sw, sh, dw, dh) {{ const scale = Math.max(dw/sw, dh/sh); const
 function shuffleArray(arr) {{ const a=arr.slice(); for(let i=a.length-1;i>0;i--) {{ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }} return a; }}
 function isVerticalPhone() {{ return window.matchMedia("(pointer: coarse)").matches && window.innerHeight > window.innerWidth; }}
 function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly && !isVerticalPhone()); }}
+const badSrcs = new Set();       // permanently rejected this session
+const tempFails = new Set();     // temporary network failures — retryable
 function refillPool() {{
   let candidates = slides
     .filter(slideAllowedForCurrentOrientation)
     .map(s => s.src)
     .filter(src => !badSrcs.has(src));
 
-  // If temporary proxy/network failures marked too much bad, recover instead of
-  // cycling only a few survivors forever.
-  if (candidates.length < Math.min(35, Math.max(8, slides.length * 0.20)) && badSrcs.size > 0) {{
-    badSrcs.clear();
-    candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
+  // If temp failures are clogging the pool, clear them and retry.
+  if (candidates.length < Math.min(20, Math.max(5, slides.length * 0.10)) && tempFails.size > 0) {{
+    tempFails.clear();
+    candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src).filter(src => !badSrcs.has(src));
   }}
 
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
@@ -1184,7 +1187,16 @@ function loadRandomSlide(attempts=0) {{
   }};
 
   loader.onerror = () => {{
-    badSrcs.add(src);
+    // 415 = permanently bad (graphic/portrait/known-bad); anything else = temp network fail.
+    // We can't read HTTP status from Image.onerror, so treat all errors as temp
+    // fails first — they'll be retried. Only move to badSrcs after 3 failures.
+    const failCount = (loader._failCount || 0) + 1;
+    if (failCount >= 3) {{
+      badSrcs.add(src);
+    }} else {{
+      tempFails.add(src);
+      shuffledPool = shuffledPool.filter(s => s !== src);
+    }}
     shuffledPool = shuffledPool.filter(s => s !== src);
     isLoadingSlide = false;
     setTimeout(() => loadRandomSlide(attempts + 1), 30);
@@ -1209,8 +1221,8 @@ resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool();
 }})();
 setTimeout(function rotateSlides() {{
   loadRandomSlide();
-  setTimeout(rotateSlides, 5000);
-}}, 5000);
+  setTimeout(rotateSlides, 3000);
+}}, 3000);
 
 // Poll /images.json — first attempt after 8 s (gives background thread time
 // to finish its first crawl), then every 30 s. If still empty, retry sooner.
@@ -1351,6 +1363,11 @@ class Handler(BaseHTTPRequestHandler):
                             print("[REJECT low resolution]", url, iw, ih)
                             self.safe_send_bytes(415, b"Rejected low resolution image", extra_headers={"Cache-Control": "no-store"})
                             return
+                        if image_is_probably_full_graphic_page(data):
+                            REJECT_CACHE[url] = {"time": time.time()}
+                            print("[REJECT graphic pre-crop]", url)
+                            self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
+                            return
                         cropped, did_crop = crop_top_if_needed(img, url)
                         if cropped is not None and cropped.size > 0:
                             ok, encoded = cv2.imencode(".jpg", cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
@@ -1362,6 +1379,16 @@ class Handler(BaseHTTPRequestHandler):
                                     print("[CROP top]", url)
                 except Exception:
                     test_data = data
+                if image_is_probably_full_graphic_page(test_data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT graphic]", url)
+                    self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
+                    return
+                if image_has_center_divider(test_data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT divider]", url)
+                    self.safe_send_bytes(415, b"Rejected center divider", extra_headers={"Cache-Control": "no-store"})
+                    return
                 print("[SERVE]", url)
                 PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
                 self.safe_send_bytes(200, data, content_type, {"Cache-Control": "public, max-age=300"})
