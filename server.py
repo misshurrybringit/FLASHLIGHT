@@ -219,6 +219,8 @@ def clean_extracted_image_url(url):
     # AP /projects/ URLs are always graphics/interactives, never photos.
     if "apnews.com/projects/" in lower:
         return None
+    # Catch dims.apnews.com wrappers around .png inner assets.
+    if "dims.apnews.com" in lower:
         inner = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("url", [""])[0]
         if inner.lower().endswith(".png"):
             return None
@@ -688,12 +690,9 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
     images = []
     seen = set()
-    start_time = time.time()
-    time_budget_seconds = 18.0
     non_bbc_article_scrape_budget = 120
-    non_bbc_article_scrapes = 0
     bbc_added = 0
-    # Cap BBC so AP/Reuters/Guardian/NPR dominate the pool.
+    page_article_scrape_budget = 90
     max_bbc_images = int(limit * 0.06)
 
     def add_image(img):
@@ -718,64 +717,94 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             break
         add_image(img)
 
-    feeds = RSS_FEEDS[:]
-    # Keep non-BBC feeds before BBC feeds so they are not squeezed out by BBC volume.
-    non_bbc_feeds = [f for f in feeds if not is_bbc_feed_url(f)]
-    bbc_feeds = [f for f in feeds if is_bbc_feed_url(f)]
-    random.shuffle(non_bbc_feeds)
-    random.shuffle(bbc_feeds)
-    feeds = non_bbc_feeds + bbc_feeds
-    for feed_url in feeds:
-        if len(images) >= limit:
-            break
-        if time.time() - start_time > time_budget_seconds and images:
-            break
+    def fetch_one_feed(feed_url):
+        """Fetch one RSS feed and return list of image URLs found."""
+        found = []
         try:
-            rss = fetch_text(feed_url, timeout=2.5)
+            rss = fetch_text(feed_url, timeout=4.0)
             root = ET.fromstring(rss)
             items = root.findall(".//item")
             random.shuffle(items)
-            item_limit = 750 if is_bbc_feed_url(feed_url) else 90
+            is_bbc = is_bbc_feed_url(feed_url)
+            item_limit = 750 if is_bbc else 90
             for item in items[:item_limit]:
-                if len(images) >= limit:
-                    break
-                if is_bbc_feed_url(feed_url) and bbc_added >= max_bbc_images:
-                    continue
                 img = extract_rss_item_image(item)
-                if add_image(img):
-                    if is_bbc_feed_url(feed_url):
-                        bbc_added += 1
-                    continue
-                if not is_bbc_feed_url(feed_url) and non_bbc_article_scrapes < non_bbc_article_scrape_budget:
+                if img:
+                    cleaned = clean_extracted_image_url(img)
+                    if cleaned and not url_is_known_bad(cleaned):
+                        found.append((cleaned, is_bbc))
+                elif not is_bbc:
                     link = item.find("link")
                     if link is not None and link.text:
-                        non_bbc_article_scrapes += 1
-                        add_image(extract_image_from_html_page(link.text.strip()))
+                        found.append((link.text.strip(), "article_link"))
         except Exception:
-            continue
+            pass
+        return found
+
+    feeds = RSS_FEEDS[:]
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        feed_futures = {ex.submit(fetch_one_feed, f): f for f in feeds}
+        article_links_to_scrape = []
+        for fut in as_completed(feed_futures):
+            try:
+                for item in fut.result():
+                    url_or_link, kind = item
+                    if kind == "article_link":
+                        article_links_to_scrape.append(url_or_link)
+                    else:
+                        is_bbc = kind
+                        if is_bbc and bbc_added >= max_bbc_images:
+                            continue
+                        if add_image(url_or_link) and is_bbc:
+                            bbc_added += 1
+            except Exception:
+                pass
+
+    # Scrape article pages from RSS that had no inline image, in parallel.
+    random.shuffle(article_links_to_scrape)
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        article_futures = [ex.submit(extract_image_from_html_page, l)
+                          for l in article_links_to_scrape[:non_bbc_article_scrape_budget]]
+        for fut in as_completed(article_futures):
+            try:
+                add_image(fut.result())
+            except Exception:
+                pass
+
+    def scrape_source_page(page_url):
+        found_imgs = []
+        found_links = []
+        try:
+            html = fetch_text(page_url, timeout=3.0)
+            found_imgs = extract_inline_images_from_html(html, page_url, max_images=60)
+            found_links = extract_article_links_from_html(html, page_url, max_links=60)
+        except Exception:
+            pass
+        return found_imgs, found_links
 
     pages = SOURCE_PAGES[:]
     random.shuffle(pages)
-    page_article_scrapes = 0
-    page_article_scrape_budget = 90
-    for page_url in pages:
-        if len(images) >= limit:
-            break
-        if time.time() - start_time > time_budget_seconds + 3.0 and images:
-            break
-        try:
-            html = fetch_text(page_url, timeout=2.5)
-            for img in extract_inline_images_from_html(html, page_url, max_images=60):
-                add_image(img)
-            links = extract_article_links_from_html(html, page_url, max_links=60)
-            random.shuffle(links)
-            for link in links:
-                if len(images) >= limit or page_article_scrapes >= page_article_scrape_budget:
-                    break
-                page_article_scrapes += 1
-                add_image(extract_image_from_html_page(link))
-        except Exception:
-            continue
+    all_article_links = []
+    with ThreadPoolExecutor(max_workers=14) as ex:
+        page_futures = {ex.submit(scrape_source_page, p): p for p in pages}
+        for fut in as_completed(page_futures):
+            try:
+                imgs, links = fut.result()
+                for img in imgs:
+                    add_image(img)
+                all_article_links.extend(links)
+            except Exception:
+                pass
+
+    random.shuffle(all_article_links)
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        art_futures = [ex.submit(extract_image_from_html_page, l)
+                      for l in all_article_links[:page_article_scrape_budget]]
+        for fut in as_completed(art_futures):
+            try:
+                add_image(fut.result())
+            except Exception:
+                pass
 
     ordered = weighted_image_mix(images, limit=limit)
 
