@@ -1098,18 +1098,16 @@ function fitCover(sw, sh, dw, dh) {{ const scale = Math.max(dw/sw, dh/sh); const
 function shuffleArray(arr) {{ const a=arr.slice(); for(let i=a.length-1;i>0;i--) {{ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }} return a; }}
 function isVerticalPhone() {{ return window.matchMedia("(pointer: coarse)").matches && window.innerHeight > window.innerWidth; }}
 function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly && !isVerticalPhone()); }}
-const badSrcs = new Set();       // permanently rejected this session
-const tempFails = new Set();     // temporary network failures — retryable
+const badSrcs = new Set();
 function refillPool() {{
   let candidates = slides
     .filter(slideAllowedForCurrentOrientation)
     .map(s => s.src)
     .filter(src => !badSrcs.has(src));
 
-  // If temp failures are clogging the pool, clear them and retry.
-  if (candidates.length < Math.min(20, Math.max(5, slides.length * 0.10)) && tempFails.size > 0) {{
-    tempFails.clear();
-    candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src).filter(src => !badSrcs.has(src));
+  if (candidates.length < 10 && badSrcs.size > 0) {{
+    badSrcs.clear();
+    candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
   }}
 
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
@@ -1187,16 +1185,7 @@ function loadRandomSlide(attempts=0) {{
   }};
 
   loader.onerror = () => {{
-    // 415 = permanently bad (graphic/portrait/known-bad); anything else = temp network fail.
-    // We can't read HTTP status from Image.onerror, so treat all errors as temp
-    // fails first — they'll be retried. Only move to badSrcs after 3 failures.
-    const failCount = (loader._failCount || 0) + 1;
-    if (failCount >= 3) {{
-      badSrcs.add(src);
-    }} else {{
-      tempFails.add(src);
-      shuffledPool = shuffledPool.filter(s => s !== src);
-    }}
+    badSrcs.add(src);
     shuffledPool = shuffledPool.filter(s => s !== src);
     isLoadingSlide = false;
     setTimeout(() => loadRandomSlide(attempts + 1), 30);
