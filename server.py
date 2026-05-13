@@ -843,7 +843,7 @@ def _background_pool_refresher():
 
 
 def _pre_vet_one(url):
-    """Fetch and cv2-check one image; add to APPROVED_URLS if it passes."""
+    """Fetch and size-check one image; add to APPROVED_URLS if it passes."""
     if url in APPROVED_URLS or url in REJECT_CACHE:
         return
     try:
@@ -860,13 +860,9 @@ def _pre_vet_one(url):
         if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
             REJECT_CACHE[url] = {"time": time.time()}
             return
-        if image_is_probably_full_graphic_page(data):
-            REJECT_CACHE[url] = {"time": time.time()}
-            return
-        if image_has_center_divider(data):
-            REJECT_CACHE[url] = {"time": time.time()}
-            return
-        if image_is_portrait_or_generic_isolated_subject(data):
+        # Only reject extreme portraits (very tall/narrow) — skip graphic/divider/subject checks
+        # as they have a ~95% false positive rate on real news photos.
+        if ih > iw * 1.4:
             REJECT_CACHE[url] = {"time": time.time()}
             return
         APPROVED_URLS.add(url)
@@ -1533,7 +1529,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.safe_send_bytes(200, data, content_type, {"Cache-Control": "public, max-age=300"})
                     return
 
-                # Not yet vetted — run full cv2 pipeline.
+                # Not yet vetted — run size check only.
                 test_data = data
                 try:
                     arr = np.frombuffer(data, np.uint8)
@@ -1544,31 +1540,18 @@ class Handler(BaseHTTPRequestHandler):
                             REJECT_CACHE[url] = {"time": time.time()}
                             self.safe_send_bytes(415, b"Rejected low resolution image", extra_headers={"Cache-Control": "no-store"})
                             return
-                        if image_is_probably_full_graphic_page(data):
+                        if ih > iw * 1.4:
                             REJECT_CACHE[url] = {"time": time.time()}
-                            self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
+                            self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
                             return
                         cropped, did_crop = crop_top_if_needed(img, url)
                         if cropped is not None and cropped.size > 0:
                             ok, encoded = cv2.imencode(".jpg", cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
                             if ok:
                                 data = encoded.tobytes()
-                                test_data = data
                                 content_type = "image/jpeg"
                 except Exception:
-                    test_data = data
-                if image_is_probably_full_graphic_page(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
-                    return
-                if image_has_center_divider(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    self.safe_send_bytes(415, b"Rejected center divider", extra_headers={"Cache-Control": "no-store"})
-                    return
-                if image_is_portrait_or_generic_isolated_subject(test_data):
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    self.safe_send_bytes(415, b"Rejected portrait or isolated subject", extra_headers={"Cache-Control": "no-store"})
-                    return
+                    pass
                 APPROVED_URLS.add(url)
                 PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
                 self.safe_send_bytes(200, data, content_type, {"Cache-Control": "public, max-age=300"})
