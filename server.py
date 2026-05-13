@@ -32,6 +32,18 @@ RSS_FEEDS = [
     # Guardian.
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
+    "https://www.theguardian.com/uk-news/rss",
+    "https://www.theguardian.com/world/middleeast/rss",
+    "https://www.theguardian.com/world/europe-news/rss",
+    "https://www.theguardian.com/world/asia/rss",
+    "https://www.theguardian.com/world/africa/rss",
+
+    # Al Jazeera English.
+    "https://www.aljazeera.com/xml/rss/all.xml",
+
+    # Reuters via Yahoo News (Reuters images come through here).
+    "https://news.yahoo.com/rss/world",
+    "https://news.yahoo.com/rss/us",
 ]
 
 SOURCE_PAGES = [
@@ -92,6 +104,10 @@ DIRECT_IMAGE_PAGES = [
     # Guardian world news.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
+
+    # Al Jazeera English.
+    "https://www.aljazeera.com/news/",
+    "https://www.aljazeera.com/gallery/",
 ]
 
 HEADERS = {
@@ -428,6 +444,8 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "cloudfront-us-east-2.images.arcpublishing.com",
             "media.guim.co.uk",
             "npr.brightspotcdn.com",
+            "www.aljazeera.com/wp-content/uploads",
+            "interactive.aljazeera.com",
             ".jpg",
             ".jpeg",
             ".webp",
@@ -632,9 +650,9 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     # buckets fill the rest without causing errors.
     mixed = (
         buckets["ap"][:700]
-        + buckets["reuters"][:350]
-        + buckets["guardian"][:250]
-        + buckets["other"][:100]
+        + buckets["reuters"][:300]
+        + buckets["guardian"][:300]
+        + buckets["other"][:200]
         + buckets["bbc"][:60]
     )
 
@@ -1323,6 +1341,8 @@ class Handler(BaseHTTPRequestHandler):
                     counts["reuters"] += 1
                 elif "guim.co.uk" in lower or "theguardian" in lower:
                     counts["guardian"] += 1
+                elif "aljazeera" in lower:
+                    counts["other"] += 1
                 elif "npr" in lower or "brightspotcdn" in lower:
                     counts["npr"] += 1
                 else:
