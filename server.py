@@ -46,6 +46,9 @@ RSS_FEEDS = [
     # Al Jazeera English RSS — images served from img.aljazeera.net CDN which is open.
     "https://www.aljazeera.com/xml/rss/all.xml",
 
+    # Der Spiegel International — strong photojournalism.
+    "https://www.spiegel.de/international/index.rss",
+
     # Reuters via Yahoo News.
     "https://news.yahoo.com/rss/world",
     "https://news.yahoo.com/rss/us",
@@ -178,6 +181,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "4885843ae10b48aa9c1f8de09b6b1f86",
     "f18450782e9244acbe1c080840e9ab7a",
     "af6c0ee0",
+    "11127980",
+    "d1e71250",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -239,6 +244,9 @@ def clean_extracted_image_url(url):
     if any(t in fname_lower for t in sports_entertainment_terms):
         return None
     if "assets.apnews.com" in lower and lower.endswith(".png"):
+        return None
+    # BBC /images/ic/ URLs with programme IDs (p0...) are show/podcast assets, not news photos.
+    if "bbci.co.uk/images/ic/" in lower and "/p0" in lower:
         return None
     # AP /projects/ URLs are always graphics/interactives, never photos.
     if "apnews.com/projects/" in lower:
@@ -481,6 +489,9 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "npr.brightspotcdn.com",
             "img.aljazeera.net",
             "www.aljazeera.com/wp-content",
+            "upload.wikimedia.org",
+            "images.spiegel.de",
+            "cdn1.spiegel.de",
             ".jpg",
             ".jpeg",
             ".webp",
@@ -579,7 +590,69 @@ def _scrape_one_article(args):
         return []
 
 
-def fetch_ap_hub_images(hub_slug, limit=40):
+def fetch_wikimedia_news_images(limit=60):
+    """Fetch documentary news images from Wikimedia Commons 'In the news' category."""
+    images = []
+    try:
+        # Fetch recent "In the news" featured images via the Commons API.
+        api_url = (
+            "https://commons.wikimedia.org/w/api.php"
+            "?action=query&list=categorymembers&cmtitle=Category:Quality_images_of_people"
+            "&cmtype=file&cmlimit=50&cmnamespace=6"
+            "&prop=imageinfo&iiprop=url|size&iiurlwidth=1200"
+            "&format=json&origin=*"
+        )
+        data = fetch_text(api_url, timeout=6)
+        blob = json.loads(data)
+        pages = blob.get("query", {}).get("categorymembers", [])
+        # Also fetch current events images
+        api_url2 = (
+            "https://commons.wikimedia.org/w/api.php"
+            "?action=query&list=categorymembers&cmtitle=Category:Images_from_Wiki_Loves_Earth_2024"
+            "&cmtype=file&cmlimit=30&cmnamespace=6"
+            "&format=json&origin=*"
+        )
+        # Use a simpler approach — query the Portal:Current_events images
+        portal_url = (
+            "https://en.wikipedia.org/w/api.php"
+            "?action=query&titles=Portal:Current_events"
+            "&prop=images&imlimit=50&format=json"
+        )
+        portal_data = fetch_text(portal_url, timeout=6)
+        portal_blob = json.loads(portal_data)
+        portal_pages = list(portal_blob.get("query", {}).get("pages", {}).values())
+        filenames = []
+        for page in portal_pages:
+            for img in page.get("images", []):
+                title = img.get("title", "")
+                if title.startswith("File:") and any(
+                    title.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".webp"]
+                ):
+                    filenames.append(title)
+
+        if filenames:
+            titles_param = "|".join(filenames[:30])
+            info_url = (
+                f"https://en.wikipedia.org/w/api.php"
+                f"?action=query&titles={urllib.parse.quote(titles_param)}"
+                f"&prop=imageinfo&iiprop=url|size&iiurlwidth=1200&format=json"
+            )
+            info_data = fetch_text(info_url, timeout=6)
+            info_blob = json.loads(info_data)
+            for page in info_blob.get("query", {}).get("pages", {}).values():
+                for ii in page.get("imageinfo", []):
+                    url = ii.get("thumburl") or ii.get("url", "")
+                    w = ii.get("thumbwidth", 0) or ii.get("width", 0)
+                    h = ii.get("thumbheight", 0) or ii.get("height", 0)
+                    if url and w >= 800 and h >= 450 and w > h:
+                        cleaned = clean_extracted_image_url(url)
+                        if cleaned and not url_is_known_bad(cleaned):
+                            images.append(cleaned)
+                            if len(images) >= limit:
+                                return images
+    except Exception as e:
+        print("[Wikimedia] error:", e)
+    return images
     """Fetch images from AP's content API for a given hub slug."""
     images = []
     try:
@@ -794,6 +867,14 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
     print(f"[BG] After AP JSON API: {len(images)} images")
 
+    # Wikimedia current events images — freely licensed documentary photos.
+    try:
+        for img in fetch_wikimedia_news_images(limit=60):
+            add_image(img)
+        print(f"[BG] After Wikimedia: {len(images)} images")
+    except Exception as e:
+        print("[BG] Wikimedia error:", e)
+
     def fetch_one_feed(feed_url):
         """Fetch one RSS feed and return list of image URLs found."""
         found = []
@@ -907,7 +988,7 @@ def _background_pool_refresher():
 
 
 def _pre_vet_one(url):
-    """Fetch and size-check one image; add to APPROVED_URLS if it passes."""
+    """Fetch and check one image; add to APPROVED_URLS if it passes."""
     if url in APPROVED_URLS:
         return
     try:
@@ -924,9 +1005,18 @@ def _pre_vet_one(url):
         if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
             REJECT_CACHE[url] = {"time": time.time()}
             return
-        # Only reject extreme portraits (very tall/narrow) — skip graphic/divider/subject checks
-        # as they have a ~95% false positive rate on real news photos.
+        # Reject extreme portraits by aspect ratio.
         if ih > iw * 1.4:
+            REJECT_CACHE[url] = {"time": time.time()}
+            return
+        # Run content checks — these are slow but happen once in background.
+        if image_is_portrait_or_generic_isolated_subject(data):
+            REJECT_CACHE[url] = {"time": time.time()}
+            return
+        if image_is_probably_full_graphic_page(data):
+            REJECT_CACHE[url] = {"time": time.time()}
+            return
+        if image_has_center_divider(data):
             REJECT_CACHE[url] = {"time": time.time()}
             return
         APPROVED_URLS.add(url)
@@ -1081,31 +1171,32 @@ def image_is_portrait_or_generic_isolated_subject(data):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    # 1) Face/headshot rejection. Small crowd faces should pass; big centered faces do not.
+    # 1) Face/headshot rejection. Only reject when a face clearly dominates the frame.
     cascade = get_cv2_face_cascade()
     if cascade is not None:
         faces = cascade.detectMultiScale(
             gray,
             scaleFactor=1.08,
             minNeighbors=5,
-            minSize=(max(34, int(w * 0.055)), max(34, int(h * 0.075))),
+            minSize=(max(50, int(w * 0.08)), max(50, int(h * 0.10))),
         )
         if len(faces) == 1:
             x, y, fw, fh = faces[0]
             face_area = (fw * fh) / float(w * h)
             cx = (x + fw / 2) / float(w)
             cy = (y + fh / 2) / float(h)
-            centered = 0.25 < cx < 0.75 and 0.10 < cy < 0.62
-            if centered and face_area > 0.012:
+            centered = 0.20 < cx < 0.80 and 0.08 < cy < 0.65
+            # Reject only if face takes up >4% of frame (posed portrait/PR shot)
+            if centered and face_area > 0.04:
                 return True
         elif len(faces) == 2:
             total_area = sum((fw * fh) for (x, y, fw, fh) in faces) / float(w * h)
-            if total_area > 0.035:
+            # Two large faces = interview/handshake PR shot
+            if total_area > 0.06:
                 return True
         elif len(faces) >= 3:
-            # Crowds/scenes often have many tiny faces; only reject when faces dominate.
             total_area = sum((fw * fh) for (x, y, fw, fh) in faces) / float(w * h)
-            if total_area > 0.075:
+            if total_area > 0.12:
                 return True
 
     # 2) Generic background / isolated subject rejection.
@@ -1517,6 +1608,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/images.json":
             with IMAGE_CACHE["lock"]:
                 cached = IMAGE_CACHE["images"][:]
+            # If pre-vetting has run, only send approved URLs to client.
+            # If it hasn't run yet (APPROVED_URLS empty), send everything.
+            if APPROVED_URLS:
+                cached = [img for img in cached if img in APPROVED_URLS]
             sequence = []
             for img in cached:
                 proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
@@ -1594,8 +1689,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.safe_send_bytes(200, data, content_type, {"Cache-Control": "public, max-age=300"})
                     return
 
-                # Not yet vetted — run size check only.
-                test_data = data
+                # Not yet vetted — size check only, no cv2 content filtering.
                 try:
                     arr = np.frombuffer(data, np.uint8)
                     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -1630,6 +1724,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    REJECT_CACHE.clear()
+    APPROVED_URLS.clear()
     print()
     print("misshurry")
     print("RSS + AP/Reuters/Guardian/NPR image pool: ON")
