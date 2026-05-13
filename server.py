@@ -28,6 +28,11 @@ RSS_FEEDS = [
     "https://feeds.apnews.com/rss/apf-usnews",
     "https://feeds.apnews.com/rss/apf-politics",
     "https://feeds.apnews.com/rss/apf-intlnews",
+    "https://feeds.apnews.com/rss/apf-africa",
+    "https://feeds.apnews.com/rss/apf-asiapacific",
+    "https://feeds.apnews.com/rss/apf-europe",
+    "https://feeds.apnews.com/rss/apf-latinamerica",
+    "https://feeds.apnews.com/rss/apf-middleeast",
 
     # Guardian.
     "https://www.theguardian.com/world/rss",
@@ -41,7 +46,7 @@ RSS_FEEDS = [
     # Al Jazeera English.
     "https://www.aljazeera.com/xml/rss/all.xml",
 
-    # Reuters via Yahoo News (Reuters images come through here).
+    # Reuters via Yahoo News.
     "https://news.yahoo.com/rss/world",
     "https://news.yahoo.com/rss/us",
 ]
@@ -73,7 +78,7 @@ SOURCE_PAGES = [
 # Direct public section pages. These are scraped for image URLs because several
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
-    # AP: direct section + hub pages. These increase the pool without using entertainment/science/sports.
+    # AP: direct section + hub pages.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
@@ -91,6 +96,14 @@ DIRECT_IMAGE_PAGES = [
     "https://apnews.com/hub/elections",
     "https://apnews.com/hub/russia-ukraine",
     "https://apnews.com/hub/israel-hamas-war",
+    "https://apnews.com/hub/china",
+    "https://apnews.com/hub/india",
+    "https://apnews.com/hub/iran",
+    "https://apnews.com/hub/mexico",
+    "https://apnews.com/hub/climate-and-environment",
+    "https://apnews.com/hub/disasters",
+    "https://apnews.com/hub/photos",
+    "https://apnews.com/hub/ap-images",
 
     # Reuters regional world pages.
     "https://www.reuters.com/world/",
@@ -104,10 +117,6 @@ DIRECT_IMAGE_PAGES = [
     # Guardian world news.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
-
-    # Al Jazeera English.
-    "https://www.aljazeera.com/news/",
-    "https://www.aljazeera.com/gallery/",
 ]
 
 HEADERS = {
@@ -444,8 +453,8 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "cloudfront-us-east-2.images.arcpublishing.com",
             "media.guim.co.uk",
             "npr.brightspotcdn.com",
-            "www.aljazeera.com/wp-content/uploads",
-            "interactive.aljazeera.com",
+            "cbsnews.com",
+            "abcnews",
             ".jpg",
             ".jpeg",
             ".webp",
@@ -1341,8 +1350,6 @@ class Handler(BaseHTTPRequestHandler):
                     counts["reuters"] += 1
                 elif "guim.co.uk" in lower or "theguardian" in lower:
                     counts["guardian"] += 1
-                elif "aljazeera" in lower:
-                    counts["other"] += 1
                 elif "npr" in lower or "brightspotcdn" in lower:
                     counts["npr"] += 1
                 else:
