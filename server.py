@@ -137,6 +137,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "f71df60c287b45bdb8f6e93cf9b1ca2b",
     "d37c3f215c3a40c9bb9c37c6e2e6bdd5",
     "4885843ae10b48aa9c1f8de09b6b1f86",
+    "f18450782e9244acbe1c080840e9ab7a",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1170,8 +1171,15 @@ function loadRandomSlide(attempts=0) {{
   const loader = new Image();
   loader.decoding = "async";
 
+  // Safety valve — if the image neither loads nor errors within 6s, move on.
+  const timeout = setTimeout(() => {{
+    isLoadingSlide = false;
+    badSrcs.add(src);
+    loadRandomSlide(attempts + 1);
+  }}, 6000);
+
   loader.onload = () => {{
-    // Do not delete from slides. Mark unusable for this session only.
+    clearTimeout(timeout);
     if (!isVerticalPhone() && loader.naturalHeight > loader.naturalWidth * 1.08) {{
       badSrcs.add(src);
       shuffledPool = shuffledPool.filter(s => s !== src);
@@ -1179,12 +1187,12 @@ function loadRandomSlide(attempts=0) {{
       setTimeout(() => loadRandomSlide(attempts + 1), 30);
       return;
     }}
-
     prepareAndDraw(loader, src);
     isLoadingSlide = false;
   }};
 
   loader.onerror = () => {{
+    clearTimeout(timeout);
     badSrcs.add(src);
     shuffledPool = shuffledPool.filter(s => s !== src);
     isLoadingSlide = false;
@@ -1200,21 +1208,27 @@ debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const 
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
 resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool();
 
-// Keep trying to load a slide every second until we have one, then hand off
-// to the normal 5 s rotation timer.
+// Keep trying to load a slide every second until we have one.
 (function tryLoad() {{
   if (!currentImage) {{
     loadRandomSlide();
     setTimeout(tryLoad, 1000);
   }}
 }})();
-setTimeout(function rotateSlides() {{
-  loadRandomSlide();
-  setTimeout(rotateSlides, 3000);
-}}, 3000);
 
-// Poll /images.json — first attempt after 8 s (gives background thread time
-// to finish its first crawl), then every 30 s. If still empty, retry sooner.
+// Only start rotation timer after we have a first image.
+(function waitForFirst() {{
+  if (!currentImage) {{
+    setTimeout(waitForFirst, 500);
+    return;
+  }}
+  setTimeout(function rotateSlides() {{
+    loadRandomSlide();
+    setTimeout(rotateSlides, 5000);
+  }}, 5000);
+}})();
+
+// Poll /images.json — first attempt after 3 s, then every 30 s.
 (function pollImages() {{
   async function refresh() {{
     try {{
@@ -1237,7 +1251,6 @@ setTimeout(function rotateSlides() {{
           }}
           setTimeout(refresh, 30000);
         }} else {{
-          // Cache still empty — retry in 4 s
           setTimeout(refresh, 4000);
         }}
       }} else {{
@@ -1245,7 +1258,7 @@ setTimeout(function rotateSlides() {{
       }}
     }} catch(e) {{ setTimeout(refresh, 4000); }}
   }}
-  setTimeout(refresh, 8000);
+  setTimeout(refresh, 3000);
 }})();
 </script>
 </body>
@@ -1377,6 +1390,11 @@ class Handler(BaseHTTPRequestHandler):
                     REJECT_CACHE[url] = {"time": time.time()}
                     print("[REJECT divider]", url)
                     self.safe_send_bytes(415, b"Rejected center divider", extra_headers={"Cache-Control": "no-store"})
+                    return
+                if image_is_portrait_or_generic_isolated_subject(test_data):
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    print("[REJECT portrait]", url)
+                    self.safe_send_bytes(415, b"Rejected portrait or isolated subject", extra_headers={"Cache-Control": "no-store"})
                     return
                 print("[SERVE]", url)
                 PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
