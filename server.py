@@ -43,7 +43,7 @@ RSS_FEEDS = [
     "https://www.theguardian.com/world/asia/rss",
     "https://www.theguardian.com/world/africa/rss",
 
-    # Al Jazeera English.
+    # Al Jazeera English RSS — images served from img.aljazeera.net CDN which is open.
     "https://www.aljazeera.com/xml/rss/all.xml",
 
     # Reuters via Yahoo News.
@@ -78,7 +78,7 @@ SOURCE_PAGES = [
 # Direct public section pages. These are scraped for image URLs because several
 # non-BBC sources do not expose usable images through RSS.
 DIRECT_IMAGE_PAGES = [
-    # AP: direct section + hub pages.
+    # AP: direct section + hub pages, multiple pages each.
     "https://apnews.com/",
     "https://apnews.com/world-news",
     "https://apnews.com/us-news",
@@ -104,6 +104,17 @@ DIRECT_IMAGE_PAGES = [
     "https://apnews.com/hub/disasters",
     "https://apnews.com/hub/photos",
     "https://apnews.com/hub/ap-images",
+    # Page 2+ for high-volume hubs.
+    "https://apnews.com/hub/world-news?page=2",
+    "https://apnews.com/hub/world-news?page=3",
+    "https://apnews.com/hub/ap-top-news?page=2",
+    "https://apnews.com/hub/ap-top-news?page=3",
+    "https://apnews.com/hub/us-news?page=2",
+    "https://apnews.com/hub/middle-east?page=2",
+    "https://apnews.com/hub/europe?page=2",
+    "https://apnews.com/hub/asia-pacific?page=2",
+    "https://apnews.com/hub/photos?page=2",
+    "https://apnews.com/hub/photos?page=3",
 
     # Reuters regional world pages.
     "https://www.reuters.com/world/",
@@ -125,8 +136,8 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-MAX_IMAGE_POOL = 600
-SEQUENCE_LENGTH = 500
+MAX_IMAGE_POOL = 900
+SEQUENCE_LENGTH = 800
 IMAGE_CACHE = {"time": 0, "images": [], "lock": threading.Lock()}
 CACHE_SECONDS = 120
 BACKGROUND_REFRESH_SECONDS = 120  # pre-warm interval
@@ -137,6 +148,9 @@ PROXY_CACHE_MAX_ITEMS = 80
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
+
+# URLs that passed cv2 checks during pool build — skip checks at serve time.
+APPROVED_URLS = set()
 
 MIN_IMAGE_WIDTH = 760
 MIN_IMAGE_HEIGHT = 430
@@ -455,8 +469,8 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "cloudfront-us-east-2.images.arcpublishing.com",
             "media.guim.co.uk",
             "npr.brightspotcdn.com",
-            "cbsnews.com",
-            "abcnews",
+            "img.aljazeera.net",
+            "www.aljazeera.com/wp-content",
             ".jpg",
             ".jpeg",
             ".webp",
@@ -689,9 +703,9 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
     images = []
     seen = set()
-    non_bbc_article_scrape_budget = 40
+    non_bbc_article_scrape_budget = 60
     bbc_added = 0
-    page_article_scrape_budget = 30
+    page_article_scrape_budget = 50
     max_bbc_images = int(limit * 0.06)
 
     def add_image(img):
@@ -711,7 +725,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         return True
 
     # Direct public pages first. This is the most reliable way to get AP scene images.
-    for img in get_direct_page_images(limit=820):
+    for img in get_direct_page_images(limit=1000):
         if len(images) >= limit:
             break
         add_image(img)
@@ -821,9 +835,54 @@ def _background_pool_refresher():
             t0 = time.time()
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
             print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s")
+            # Pre-vet images in background so proxy can skip cv2 at serve time.
+            _pre_vet_pool(images)
         except Exception as e:
             print("[BG] Refresh error:", e)
         time.sleep(BACKGROUND_REFRESH_SECONDS)
+
+
+def _pre_vet_one(url):
+    """Fetch and cv2-check one image; add to APPROVED_URLS if it passes."""
+    if url in APPROVED_URLS or url in REJECT_CACHE:
+        return
+    try:
+        data, content_type = fetch_bytes(url, timeout=8)
+        if not content_type.startswith("image/"):
+            REJECT_CACHE[url] = {"time": time.time()}
+            return
+        arr = np.frombuffer(data, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            REJECT_CACHE[url] = {"time": time.time()}
+            return
+        ih, iw = img.shape[:2]
+        if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
+            REJECT_CACHE[url] = {"time": time.time()}
+            return
+        if image_is_probably_full_graphic_page(data):
+            REJECT_CACHE[url] = {"time": time.time()}
+            return
+        if image_has_center_divider(data):
+            REJECT_CACHE[url] = {"time": time.time()}
+            return
+        if image_is_portrait_or_generic_isolated_subject(data):
+            REJECT_CACHE[url] = {"time": time.time()}
+            return
+        APPROVED_URLS.add(url)
+    except Exception:
+        pass
+
+
+def _pre_vet_pool(images):
+    """Pre-vet all images in the pool in the background using a thread pool."""
+    to_vet = [u for u in images if u not in APPROVED_URLS and u not in REJECT_CACHE]
+    if not to_vet:
+        return
+    print(f"[BG] Pre-vetting {len(to_vet)} images …")
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        list(ex.map(_pre_vet_one, to_vet))
+    print(f"[BG] Pre-vet done. Approved: {len(APPROVED_URLS)}")
 
 
 def image_is_probably_full_graphic_page(data):
@@ -1173,6 +1232,27 @@ function refillPool() {{
   poolIndex = 0;
 }}
 function getNextRandomSrc() {{ if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool(); if (!shuffledPool.length) return null; return shuffledPool[poolIndex++]; }}
+
+// Preload cache — keeps next N images ready so transitions are instant.
+const preloadCache = new Map(); // src -> Image (loaded)
+const PRELOAD_AHEAD = 3;
+function preloadNext() {{
+  for (let i = 0; i < PRELOAD_AHEAD; i++) {{
+    const src = shuffledPool[poolIndex + i];
+    if (src && !preloadCache.has(src) && !badSrcs.has(src)) {{
+      const img = new Image();
+      img.onload = () => preloadCache.set(src, img);
+      img.onerror = () => {{ badSrcs.add(src); }};
+      preloadCache.set(src, null); // mark as in-flight
+      img.src = src;
+    }}
+  }}
+  // Evict old entries to keep memory tidy.
+  if (preloadCache.size > 20) {{
+    const keys = [...preloadCache.keys()];
+    keys.slice(0, keys.length - 20).forEach(k => preloadCache.delete(k));
+  }}
+}}
 function makeImage(sourceImage) {{
   const off = document.createElement("canvas"); off.width = canvas.width; off.height = canvas.height;
   const offCtx = off.getContext("2d", {{ willReadFrequently: true }}); syncContextQuality(offCtx);
@@ -1226,6 +1306,24 @@ function loadRandomSlide(attempts=0) {{
   const loader = new Image();
   loader.decoding = "async";
 
+  // Use preloaded image if ready, otherwise fetch normally.
+  const preloaded = preloadCache.get(src);
+  if (preloaded && preloaded.complete && preloaded.naturalWidth > 0) {{
+    preloadCache.delete(src);
+    clearTimeout(timeout);
+    if (!isVerticalPhone() && preloaded.naturalHeight > preloaded.naturalWidth * 1.08) {{
+      badSrcs.add(src);
+      isLoadingSlide = false;
+      preloadNext();
+      setTimeout(() => loadRandomSlide(attempts + 1), 30);
+      return;
+    }}
+    prepareAndDraw(preloaded, src);
+    isLoadingSlide = false;
+    preloadNext();
+    return;
+  }}
+
   // Safety valve — if the image neither loads nor errors within 6s, move on.
   const timeout = setTimeout(() => {{
     isLoadingSlide = false;
@@ -1244,6 +1342,7 @@ function loadRandomSlide(attempts=0) {{
     }}
     prepareAndDraw(loader, src);
     isLoadingSlide = false;
+    preloadNext();
   }};
 
   loader.onerror = () => {{
@@ -1261,7 +1360,7 @@ canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
-resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool();
+resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); preloadNext();
 
 // Keep trying to load a slide every second until we have one.
 (function tryLoad() {{
@@ -1365,6 +1464,21 @@ class Handler(BaseHTTPRequestHandler):
             self.safe_send_bytes(200, data, "application/json; charset=utf-8", {"Cache-Control": "no-store"})
             return
 
+        if path == "/vetted.json":
+            with IMAGE_CACHE["lock"]:
+                pool = IMAGE_CACHE["images"][:]
+            approved = [u for u in pool if u in APPROVED_URLS]
+            rejected = [u for u in pool if u in REJECT_CACHE]
+            pending = [u for u in pool if u not in APPROVED_URLS and u not in REJECT_CACHE]
+            data = json.dumps({
+                "pool": len(pool),
+                "approved": len(approved),
+                "rejected": len(rejected),
+                "pending": len(pending),
+            }, indent=2).encode("utf-8")
+            self.safe_send_bytes(200, data, "application/json; charset=utf-8", {"Cache-Control": "no-store"})
+            return
+
         if path == "/sources.json":
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
             counts = {"bbc": 0, "ap": 0, "reuters": 0, "guardian": 0, "npr": 0, "other": 0}
@@ -1395,8 +1509,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if url_is_known_bad(url):
                 REJECT_CACHE[url] = {"time": time.time()}
-                print("[REJECT known bad]", url)
                 self.safe_send_bytes(415, b"Known bad image", extra_headers={"Cache-Control": "no-store"})
+                return
+            rejected = REJECT_CACHE.get(url)
+            if rejected and time.time() - rejected["time"] < REJECT_CACHE_SECONDS:
+                self.safe_send_bytes(415, b"Rejected", extra_headers={"Cache-Control": "no-store"})
                 return
             cleanup_proxy_cache()
             cached = PROXY_CACHE.get(url)
@@ -1409,6 +1526,14 @@ class Handler(BaseHTTPRequestHandler):
                     REJECT_CACHE[url] = {"time": time.time()}
                     self.safe_send_bytes(415, b"Not an image", extra_headers={"Cache-Control": "no-store"})
                     return
+
+                # If pre-vetted during pool build, skip all cv2 checks.
+                if url in APPROVED_URLS:
+                    PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
+                    self.safe_send_bytes(200, data, content_type, {"Cache-Control": "public, max-age=300"})
+                    return
+
+                # Not yet vetted — run full cv2 pipeline.
                 test_data = data
                 try:
                     arr = np.frombuffer(data, np.uint8)
@@ -1417,12 +1542,10 @@ class Handler(BaseHTTPRequestHandler):
                         ih, iw = img.shape[:2]
                         if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
                             REJECT_CACHE[url] = {"time": time.time()}
-                            print("[REJECT low resolution]", url, iw, ih)
                             self.safe_send_bytes(415, b"Rejected low resolution image", extra_headers={"Cache-Control": "no-store"})
                             return
                         if image_is_probably_full_graphic_page(data):
                             REJECT_CACHE[url] = {"time": time.time()}
-                            print("[REJECT graphic pre-crop]", url)
                             self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                             return
                         cropped, did_crop = crop_top_if_needed(img, url)
@@ -1432,26 +1555,21 @@ class Handler(BaseHTTPRequestHandler):
                                 data = encoded.tobytes()
                                 test_data = data
                                 content_type = "image/jpeg"
-                                if did_crop:
-                                    print("[CROP top]", url)
                 except Exception:
                     test_data = data
                 if image_is_probably_full_graphic_page(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT graphic]", url)
                     self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                     return
                 if image_has_center_divider(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT divider]", url)
                     self.safe_send_bytes(415, b"Rejected center divider", extra_headers={"Cache-Control": "no-store"})
                     return
                 if image_is_portrait_or_generic_isolated_subject(test_data):
                     REJECT_CACHE[url] = {"time": time.time()}
-                    print("[REJECT portrait]", url)
                     self.safe_send_bytes(415, b"Rejected portrait or isolated subject", extra_headers={"Cache-Control": "no-store"})
                     return
-                print("[SERVE]", url)
+                APPROVED_URLS.add(url)
                 PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
                 self.safe_send_bytes(200, data, content_type, {"Cache-Control": "public, max-age=300"})
                 return
