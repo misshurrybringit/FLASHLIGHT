@@ -188,7 +188,11 @@ def fetch_guardian_api_images(limit=200):
                 if src_match:
                     img_url = src_match.group(1)
                 # Skip staff avatars and tiny images.
-                if "/img/uploads/" in img_url or "width=80" in img_url:
+                if "/img/uploads/" in img_url or "/img/static/" in img_url:
+                    continue
+                # i.guim.co.uk is the resizing CDN used for thumbnails/bylines.
+                # Real news photos are on media.guim.co.uk.
+                if "i.guim.co.uk" in img_url:
                     continue
                 # Upgrade to large size.
                 img_url = re.sub(r'width=\d+', 'width=2000', img_url)
@@ -541,7 +545,6 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "static.reuters.com",
             "cloudfront-us-east-2.images.arcpublishing.com",
             "media.guim.co.uk",
-            "i.guim.co.uk",
             "npr.brightspotcdn.com",
             "img.aljazeera.net",
             "www.aljazeera.com/wp-content",
@@ -560,9 +563,7 @@ def extract_image_urls_from_html(html, base_url, limit=80):
         if "media.npr.org" in lower:
             return False
         # Guardian author avatars and small images.
-        if "guim.co.uk" in lower and "/img/uploads/" in lower:
-            return False
-        if "guim.co.uk" in lower and "width=80" in lower:
+        if "i.guim.co.uk" in lower:
             return False
         # NPR brightspotcdn URLs with non-news filenames (games, puzzles, podcasts etc).
         if "brightspotcdn" in lower and any(bad in lower for bad in [
@@ -1439,7 +1440,7 @@ let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
-const RECENT_LIMIT = 90;
+const RECENT_LIMIT = 800;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
