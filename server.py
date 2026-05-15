@@ -1,4 +1,3 @@
-
 import json
 import os
 import random
@@ -1557,96 +1556,6 @@ function startSlideshow() {{
   }})();
 }}
 
-(function() {{
-  const isMobile = window.matchMedia('(pointer: coarse)').matches;
-  const isPWA = window.matchMedia('(display-mode: fullscreen)').matches
-             || window.navigator.standalone === true;
-
-  if (isMobile && !isPWA) {{
-    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    const isAndroid = /android/i.test(navigator.userAgent);
-    const el = document.getElementById('install-msg');
-
-    const iosInstructions = [
-      "misshurry",
-      "",
-      "This is a web app about news images.",
-      "To install it on your phone:",
-      "",
-      "1. Open this page in Safari.",
-      "",
-      "2. Tap the Share button at the",
-      "   bottom of the screen \u2014",
-      "   it looks like a box with an",
-      "   arrow pointing upward.",
-      "",
-      "3. Scroll down in the menu",
-      "   that appears.",
-      "",
-      "4. Tap \u201cAdd to Home Screen\u201d.",
-      "",
-      "5. Tap \u201cAdd\u201d in the top right corner.",
-      "",
-      "6. Find the misshurry icon",
-      "   on your home screen and open it.",
-      "",
-      "7. Turn your phone horizontal.",
-    ];
-
-    const androidInstructions = [
-      "misshurry",
-      "",
-      "This is a web app about news images.",
-      "To install it on your phone:",
-      "",
-      "1. Open this page in Chrome.",
-      "",
-      "2. Tap the three dots \u22ee in the",
-      "   top right corner.",
-      "",
-      "3. Tap \u201cAdd to Home screen\u201d.",
-      "",
-      "4. Tap \u201cAdd\u201d to confirm.",
-      "",
-      "5. Find the misshurry icon",
-      "   on your home screen and open it.",
-      "",
-      "6. Turn your phone horizontal.",
-    ];
-
-    const lines = isIOS ? iosInstructions : isAndroid ? androidInstructions : null;
-    if (!lines) {{ startSlideshow(); return; }}
-
-    el.style.display = 'flex';
-
-    const p = document.createElement('p');
-    p.style.cssText = 'margin:0; white-space:pre-wrap; max-width:340px;';
-    el.appendChild(p);
-
-    const fullText = lines.join('\n');
-    let i = 0;
-
-    function typeNext() {{
-      if (i >= fullText.length) {{
-        el.addEventListener('click', () => {{ el.style.display = 'none'; startSlideshow(); }});
-        return;
-      }}
-      const ch = fullText[i++];
-      p.textContent += ch;
-      let delay = 65;
-      if (ch === '\n') delay = 320;
-      else if (ch === '.' || ch === ',') delay = 280;
-      else if (ch === ' ') delay = 80;
-      else if (Math.random() < 0.1) delay = 140;
-      setTimeout(typeNext, delay);
-    }}
-
-    typeNext();
-  }} else {{
-    startSlideshow();
-  }}
-}})();
-
 let slides = {sequence_json};
 const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
 const canvas = document.getElementById("view");
@@ -1823,6 +1732,186 @@ canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
+
+// Install screen + slideshow startup — runs after all variables/functions defined.
+(function() {{
+  const isMobile = window.matchMedia('(pointer: coarse)').matches;
+  const isPWA = window.matchMedia('(display-mode: fullscreen)').matches
+             || window.navigator.standalone === true;
+
+  if (isMobile && !isPWA) {{
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isAndroid = /android/i.test(navigator.userAgent);
+    const isSafari = /safari/i.test(navigator.userAgent) && !/chrome|crios|fxios/i.test(navigator.userAgent);
+    const isChrome = /chrome|crios/i.test(navigator.userAgent);
+    const isFirefox = /fxios|firefox/i.test(navigator.userAgent);
+
+    const iosSafariInstructions = [
+      "misshurry",
+      "",
+      "This is a web app about news images.",
+      "To install it on your iPhone:",
+      "",
+      "1. Tap the Share button at the",
+      "   bottom of your screen \u2014",
+      "   it looks like a box with an",
+      "   arrow pointing upward.",
+      "",
+      "2. Scroll down in the menu",
+      "   that appears.",
+      "",
+      "3. Tap \u201cAdd to Home Screen\u201d.",
+      "",
+      "4. Tap \u201cAdd\u201d in the top right corner.",
+      "",
+      "5. Open misshurry from your",
+      "   home screen.",
+      "",
+      "6. Turn your phone horizontal.",
+    ];
+
+    const iosChromeInstructions = [
+      "misshurry",
+      "",
+      "This is a web app about news images.",
+      "To install it on your iPhone:",
+      "",
+      "1. Chrome doesn\u2019t support",
+      "   installing web apps on iPhone.",
+      "",
+      "2. Open this page in Safari instead.",
+      "   Copy this address and paste it",
+      "   into Safari.",
+      "",
+      "3. Then follow the instructions",
+      "   in Safari to add it to your",
+      "   home screen.",
+    ];
+
+    const iosOtherInstructions = [
+      "misshurry",
+      "",
+      "This is a web app about news images.",
+      "To install it on your iPhone:",
+      "",
+      "1. Open this page in Safari.",
+      "",
+      "2. Tap the Share button at the",
+      "   bottom of your screen \u2014",
+      "   it looks like a box with an",
+      "   arrow pointing upward.",
+      "",
+      "3. Tap \u201cAdd to Home Screen\u201d.",
+      "",
+      "4. Tap \u201cAdd\u201d.",
+      "",
+      "5. Open misshurry from your",
+      "   home screen.",
+      "",
+      "6. Turn your phone horizontal.",
+    ];
+
+    const androidChromeInstructions = [
+      "misshurry",
+      "",
+      "This is a web app about news images.",
+      "To install it on your phone:",
+      "",
+      "1. Tap the three dots \u22ee in the",
+      "   top right corner of Chrome.",
+      "",
+      "2. Tap \u201cAdd to Home screen\u201d.",
+      "",
+      "3. Tap \u201cAdd\u201d to confirm.",
+      "",
+      "4. Open misshurry from your",
+      "   home screen.",
+      "",
+      "5. Turn your phone horizontal.",
+    ];
+
+    const androidFirefoxInstructions = [
+      "misshurry",
+      "",
+      "This is a web app about news images.",
+      "To install it on your phone:",
+      "",
+      "1. Tap the three dots \u22ee at the",
+      "   bottom of Firefox.",
+      "",
+      "2. Tap \u201cInstall\u201d.",
+      "",
+      "3. Tap \u201cAdd to Home screen\u201d.",
+      "",
+      "4. Open misshurry from your",
+      "   home screen.",
+      "",
+      "5. Turn your phone horizontal.",
+    ];
+
+    const androidOtherInstructions = [
+      "misshurry",
+      "",
+      "This is a web app about news images.",
+      "To install it on your phone:",
+      "",
+      "1. Open this page in Chrome.",
+      "",
+      "2. Tap the three dots \u22ee in the",
+      "   top right corner.",
+      "",
+      "3. Tap \u201cAdd to Home screen\u201d.",
+      "",
+      "4. Tap \u201cAdd\u201d.",
+      "",
+      "5. Open misshurry from your",
+      "   home screen.",
+      "",
+      "6. Turn your phone horizontal.",
+    ];
+
+    let lines = null;
+    if (isIOS) {{
+      lines = isSafari ? iosSafariInstructions
+            : isChrome ? iosChromeInstructions
+            : iosOtherInstructions;
+    }} else if (isAndroid) {{
+      lines = isChrome ? androidChromeInstructions
+            : isFirefox ? androidFirefoxInstructions
+            : androidOtherInstructions;
+    }}
+    if (!lines) {{ startSlideshow(); return; }}
+
+    const el = document.getElementById('install-msg');
+    el.style.display = 'flex';
+
+    const p = document.createElement('p');
+    p.style.cssText = 'margin:0; white-space:pre-wrap; max-width:340px;';
+    el.appendChild(p);
+
+    const fullText = lines.join('\n');
+    let i = 0;
+
+    function typeNext() {{
+      if (i >= fullText.length) {{
+        el.addEventListener('click', () => {{ el.style.display = 'none'; startSlideshow(); }});
+        return;
+      }}
+      const ch = fullText[i++];
+      p.textContent += ch;
+      let delay = 65;
+      if (ch === '\n') delay = 320;
+      else if (ch === '.' || ch === ',') delay = 280;
+      else if (ch === ' ') delay = 80;
+      else if (Math.random() < 0.1) delay = 140;
+      setTimeout(typeNext, delay);
+    }}
+
+    typeNext();
+  }} else {{
+    startSlideshow();
+  }}
+}})();
 </script>
 </body>
 </html>'''
