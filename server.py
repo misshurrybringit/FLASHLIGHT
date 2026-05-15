@@ -802,14 +802,26 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         + buckets["bbc"][:60]
     )
 
+    bbc_in_mixed = sum(1 for i in mixed if source_category(i) == "bbc")
     remaining = []
     already = set(canonical_image_key(i) for i in mixed)
-    for name in ["ap", "reuters", "guardian", "npr", "other", "bbc"]:
+    for name in ["ap", "reuters", "guardian", "npr", "other"]:
         for img in buckets[name]:
             key = canonical_image_key(img)
             if key not in already:
                 already.add(key)
                 remaining.append(img)
+    # Add BBC last, hard-capped at 60 total across both passes.
+    bbc_remaining_budget = max(0, 60 - bbc_in_mixed)
+    bbc_added = 0
+    for img in buckets["bbc"]:
+        if bbc_added >= bbc_remaining_budget:
+            break
+        key = canonical_image_key(img)
+        if key not in already:
+            already.add(key)
+            remaining.append(img)
+            bbc_added += 1
     random.shuffle(remaining)
     mixed.extend(remaining)
     return mixed[:limit]
@@ -865,15 +877,15 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             except Exception:
                 pass
 
-    print(f"[BG] After AP JSON API: {len(images)} images")
+    print(f"[BG] After AP JSON API: {len(images)} images", flush=True)
 
     # Wikimedia current events images — freely licensed documentary photos.
     try:
         for img in fetch_wikimedia_news_images(limit=60):
             add_image(img)
-        print(f"[BG] After Wikimedia: {len(images)} images")
+        print(f"[BG] After Wikimedia: {len(images)} images", flush=True)
     except Exception as e:
-        print("[BG] Wikimedia error:", e)
+        print("[BG] Wikimedia error:", e, flush=True)
 
     def fetch_one_feed(feed_url):
         """Fetch one RSS feed and return list of image URLs found."""
@@ -976,14 +988,15 @@ def _background_pool_refresher():
     """Continuously rebuild the image pool so the cache is always warm."""
     while True:
         try:
-            print("[BG] Refreshing image pool …")
+            print("[BG] Refreshing image pool …", flush=True)
             t0 = time.time()
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s")
-            # Pre-vet images in background so proxy can skip cv2 at serve time.
+            print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s", flush=True)
             _pre_vet_pool(images)
         except Exception as e:
-            print("[BG] Refresh error:", e)
+            import traceback
+            print("[BG] Refresh error:", e, flush=True)
+            traceback.print_exc()
         time.sleep(BACKGROUND_REFRESH_SECONDS)
 
 
@@ -991,6 +1004,16 @@ def _pre_vet_one(url):
     """Fetch and check one image; add to APPROVED_URLS if it passes."""
     if url in APPROVED_URLS:
         return
+    # AP dims URLs are editorially curated — auto-approve without cv2.
+    if "dims.apnews.com" in url:
+        APPROVED_URLS.add(url)
+        return
+    # Non-BBC, non-AP sources — approve without cv2 checks.
+    is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
+    if not is_bbc:
+        APPROVED_URLS.add(url)
+        return
+    # BBC — run full cv2 checks to filter portraits/graphics/PR shots.
     try:
         data, content_type = fetch_bytes(url, timeout=8)
         if not content_type.startswith("image/"):
@@ -1005,11 +1028,9 @@ def _pre_vet_one(url):
         if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
             REJECT_CACHE[url] = {"time": time.time()}
             return
-        # Reject extreme portraits by aspect ratio.
         if ih > iw * 1.4:
             REJECT_CACHE[url] = {"time": time.time()}
             return
-        # Run content checks — these are slow but happen once in background.
         if image_is_portrait_or_generic_isolated_subject(data):
             REJECT_CACHE[url] = {"time": time.time()}
             return
@@ -1026,14 +1047,13 @@ def _pre_vet_one(url):
 
 def _pre_vet_pool(images):
     """Pre-vet all images in the pool in the background using a thread pool."""
-    # Clear stale rejections from previous (more aggressive) cv2 runs.
     REJECT_CACHE.clear()
     APPROVED_URLS.clear()
     to_vet = images[:]
-    print(f"[BG] Pre-vetting {len(to_vet)} images …")
+    print(f"[BG] Pre-vetting {len(to_vet)} images …", flush=True)
     with ThreadPoolExecutor(max_workers=6) as ex:
         list(ex.map(_pre_vet_one, to_vet))
-    print(f"[BG] Pre-vet done. Approved: {len(APPROVED_URLS)}")
+    print(f"[BG] Pre-vet done. Approved: {len(APPROVED_URLS)}", flush=True)
 
 
 def image_is_probably_full_graphic_page(data):
@@ -1608,10 +1628,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/images.json":
             with IMAGE_CACHE["lock"]:
                 cached = IMAGE_CACHE["images"][:]
-            # If pre-vetting has run, only send approved URLs to client.
-            # If it hasn't run yet (APPROVED_URLS empty), send everything.
+            # AP dims URLs are auto-approved — always include them.
+            # For other sources, only include if pre-vetting has approved them.
             if APPROVED_URLS:
-                cached = [img for img in cached if img in APPROVED_URLS]
+                cached = [img for img in cached if img in APPROVED_URLS or "dims.apnews.com" in img]
             sequence = []
             for img in cached:
                 proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
