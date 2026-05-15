@@ -172,7 +172,7 @@ def fetch_guardian_api_images(limit=200):
         try:
             url = (
                 f"https://content.guardianapis.com/search"
-                f"?section={section}&show-fields=thumbnail,main&page-size=50"
+                f"?section={section}&show-fields=main&page-size=50"
                 f"&order-by=newest&api-key={GUARDIAN_API_KEY}"
             )
             data = fetch_text(url, timeout=6)
@@ -180,19 +180,24 @@ def fetch_guardian_api_images(limit=200):
             results = blob.get("response", {}).get("results", [])
             for item in results:
                 fields = item.get("fields", {})
-                for field in ["main", "thumbnail"]:
-                    img_url = fields.get(field, "")
-                    if not img_url:
-                        continue
-                    cleaned = clean_extracted_image_url(img_url)
-                    if not cleaned or url_is_known_bad(cleaned):
-                        continue
-                    key = normalize_image_url_for_dedupe(cleaned)
-                    if key and key not in seen:
-                        seen.add(key)
-                        images.append(cleaned)
-                        if len(images) >= limit:
-                            return images
+                img_url = fields.get("main", "")
+                if not img_url:
+                    continue
+                # Guardian main field returns HTML — extract the src URL.
+                src_match = re.search(r'src="([^"]+)"', img_url)
+                if src_match:
+                    img_url = src_match.group(1)
+                # Upgrade to large size — replace width param with 2000.
+                img_url = re.sub(r'width=\d+', 'width=2000', img_url)
+                cleaned = clean_extracted_image_url(img_url)
+                if not cleaned or url_is_known_bad(cleaned):
+                    continue
+                key = normalize_image_url_for_dedupe(cleaned)
+                if key and key not in seen:
+                    seen.add(key)
+                    images.append(cleaned)
+                    if len(images) >= limit:
+                        return images
         except Exception as e:
             print(f"[Guardian API] {section} error: {e}", flush=True)
     print(f"[Guardian API] fetched {len(images)} images", flush=True)
@@ -259,6 +264,10 @@ def upgrade_bbc_image_url(url):
     url = url.replace("/660/", "/1024/")
     url = re.sub(r"/ic/\d+x\d+/", "/ic/1024x576/", url)
     url = re.sub(r"/standard/\d+/", "/standard/1024/", url)
+    # Upgrade AP dims resize to a larger width while keeping aspect ratio.
+    if "dims.apnews.com" in url:
+        url = re.sub(r'resize/\d+x\d+!', 'resize/2880x1920!', url)
+        url = re.sub(r'resize/\d+x\d+/', 'resize/2880x1920/', url)
     return url
 
 
