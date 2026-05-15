@@ -17,9 +17,8 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
-    # BBC: just top-level world and in_pictures — these turn over faster than regional feeds.
+    # BBC: world and top news only — in_pictures pulls too much entertainment.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://feeds.bbci.co.uk/news/in_pictures/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
 
     # AP feeds — world/politics/news only, no entertainment or sports.
@@ -49,7 +48,7 @@ RSS_FEEDS = [
     # Der Spiegel International — strong photojournalism.
     "https://www.spiegel.de/international/index.rss",
 
-    # Reuters via Yahoo News.
+    # Reuters/misc via Yahoo News.
     "https://news.yahoo.com/rss/world",
     "https://news.yahoo.com/rss/us",
 ]
@@ -239,6 +238,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "11127980",
     "d1e71250",
     "60b2cc02514450d7361aa7a4c828fd2b830e10a1",
+    "69d08f3b6f4e22f7b593c3747049897c05f3c35a",
+    "e46b9940",
+    "409aac70",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -564,9 +566,12 @@ def extract_image_urls_from_html(html, base_url, limit=80):
         if "media.npr.org" in lower:
             return False
         # Guardian author avatars and small images.
-        if "i.guim.co.uk" in lower:
+        if "yimg.com" in lower and (";w=80;" in lower or ";h=60;" in lower or "logo" in lower):
             return False
         if "interactive.guim.co.uk" in lower:
+            return False
+        # Guardian composite/collage images — always divided layouts.
+        if "guim.co.uk" in lower and "_0_5000_4000" in lower:
             return False
         # NPR brightspotcdn URLs with non-news filenames (games, puzzles, podcasts etc).
         if "brightspotcdn" in lower and any(bad in lower for bad in [
@@ -1396,9 +1401,24 @@ def image_has_center_divider(data):
     center_energy = col_energy[center_min:center_max]
     if center_energy.size == 0:
         return False
+    baseline = float(np.median(col_energy)) + 1e-6
+    # Count how many columns have strong vertical edge energy — multiple dividers
+    # show up as multiple high-energy columns across the image.
+    strong_cols = np.sum(center_energy > baseline * 2.2)
+    if strong_cols >= 2:
+        # Check each strong column spans most of the image height.
+        strong_col_indices = np.where(center_energy > baseline * 2.2)[0]
+        for ci in strong_col_indices:
+            abs_ci = center_min + ci
+            col_slice = edge_strength[:, max(0, abs_ci - 1):min(w, abs_ci + 2)]
+            row_strength = col_slice.mean(axis=1)
+            row_baseline = float(np.median(row_strength)) + 1e-6
+            strong_frac = float(np.mean(row_strength > row_baseline * 1.55))
+            if strong_frac > 0.38:
+                return True
+    # Single divider check — original logic.
     divider_x = center_min + int(np.argmax(center_energy))
     peak_energy = float(col_energy[divider_x])
-    baseline = float(np.median(col_energy)) + 1e-6
     if peak_energy < baseline * 2.2:
         return False
     col_slice = edge_strength[:, max(0, divider_x - 1):min(w, divider_x + 2)]
@@ -1471,22 +1491,19 @@ function refillPool() {{
     candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
   }}
 
-  if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
-
-  // Strictly prefer images not recently shown.
-  const recentSet = new Set(recentlyShown);
-  let fresh = candidates.filter(src => !recentSet.has(src));
-
-  // Only fall back to recently-shown when we've genuinely exhausted fresh ones.
-  if (fresh.length < 5) {{
-    fresh = candidates;
-    recentlyShown = []; // reset history when pool is genuinely exhausted
-  }}
-
-  shuffledPool = shuffleArray(fresh);
+  // Shuffle the full pool and walk through it sequentially.
+  // Only reshuffle when we've gone through everything — no repeats until full cycle.
+  shuffledPool = shuffleArray(candidates);
   poolIndex = 0;
 }}
-function getNextRandomSrc() {{ if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool(); if (!shuffledPool.length) return null; return shuffledPool[poolIndex++]; }}
+function getNextRandomSrc() {{
+  if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool();
+  if (!shuffledPool.length) return null;
+  // Skip current image to avoid immediate repeat.
+  if (shuffledPool[poolIndex] === currentSrc && shuffledPool.length > 1) poolIndex++;
+  if (poolIndex >= shuffledPool.length) refillPool();
+  return shuffledPool[poolIndex++];
+}}
 
 // Preload cache — keeps next N images ready so transitions are instant.
 const preloadCache = new Map(); // src -> Image (loaded)
@@ -1523,7 +1540,7 @@ function drawFallbackMessage() {{ ctx.clearRect(0,0,canvas.width,canvas.height);
 function drawFlashlight() {{
   if (!currentPrepared) {{ drawFallbackMessage(); return; }}
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
-  const radius = Math.sqrt(canvas.width*canvas.width + canvas.height*canvas.height) * (isTouchDevice ? 0.13 : 0.075);
+  const radius = Math.sqrt(canvas.width*canvas.width + canvas.height*canvas.height) * (isTouchDevice ? 0.09 : 0.075);
   ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
   cutout.addColorStop(0.00,"rgba(255,248,190,1.00)"); cutout.addColorStop(0.20,"rgba(255,238,150,0.84)"); cutout.addColorStop(0.50,"rgba(255,220,95,0.46)"); cutout.addColorStop(0.82,"rgba(255,200,55,0.18)"); cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
