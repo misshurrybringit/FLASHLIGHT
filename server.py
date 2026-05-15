@@ -155,6 +155,49 @@ REJECT_CACHE_SECONDS = 1800
 # URLs that passed cv2 checks during pool build — skip checks at serve time.
 APPROVED_URLS = set()
 
+GUARDIAN_API_KEY = "66bece60-5ad3-4d04-9f77-d27e8a4122c2"
+GUARDIAN_API_SECTIONS = [
+    "world", "us-news", "politics", "environment",
+    "global-development", "immigration",
+]
+
+
+def fetch_guardian_api_images(limit=200):
+    """Fetch images from Guardian open content API — structured, no scraping needed."""
+    images = []
+    seen = set()
+    for section in GUARDIAN_API_SECTIONS:
+        if len(images) >= limit:
+            break
+        try:
+            url = (
+                f"https://content.guardianapis.com/search"
+                f"?section={section}&show-fields=thumbnail,main&page-size=50"
+                f"&order-by=newest&api-key={GUARDIAN_API_KEY}"
+            )
+            data = fetch_text(url, timeout=6)
+            blob = json.loads(data)
+            results = blob.get("response", {}).get("results", [])
+            for item in results:
+                fields = item.get("fields", {})
+                for field in ["main", "thumbnail"]:
+                    img_url = fields.get(field, "")
+                    if not img_url:
+                        continue
+                    cleaned = clean_extracted_image_url(img_url)
+                    if not cleaned or url_is_known_bad(cleaned):
+                        continue
+                    key = normalize_image_url_for_dedupe(cleaned)
+                    if key and key not in seen:
+                        seen.add(key)
+                        images.append(cleaned)
+                        if len(images) >= limit:
+                            return images
+        except Exception as e:
+            print(f"[Guardian API] {section} error: {e}", flush=True)
+    print(f"[Guardian API] fetched {len(images)} images", flush=True)
+    return images
+
 MIN_IMAGE_WIDTH = 760
 MIN_IMAGE_HEIGHT = 430
 
@@ -486,6 +529,7 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "static.reuters.com",
             "cloudfront-us-east-2.images.arcpublishing.com",
             "media.guim.co.uk",
+            "i.guim.co.uk",
             "npr.brightspotcdn.com",
             "img.aljazeera.net",
             "www.aljazeera.com/wp-content",
@@ -878,6 +922,14 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                 pass
 
     print(f"[BG] After AP JSON API: {len(images)} images", flush=True)
+
+    # Guardian open content API — structured image URLs, no scraping.
+    try:
+        for img in fetch_guardian_api_images(limit=200):
+            add_image(img)
+        print(f"[BG] After Guardian API: {len(images)} images", flush=True)
+    except Exception as e:
+        print(f"[BG] Guardian API error: {e}", flush=True)
 
     # Wikimedia current events images — freely licensed documentary photos.
     try:
@@ -1478,6 +1530,13 @@ function loadRandomSlide(attempts=0) {{
   const loader = new Image();
   loader.decoding = "async";
 
+  // Safety valve — if the image neither loads nor errors within 6s, move on.
+  let timeout = setTimeout(() => {{
+    isLoadingSlide = false;
+    badSrcs.add(src);
+    loadRandomSlide(attempts + 1);
+  }}, 6000);
+
   // Use preloaded image if ready, otherwise fetch normally.
   const preloaded = preloadCache.get(src);
   if (preloaded && preloaded.complete && preloaded.naturalWidth > 0) {{
@@ -1495,13 +1554,6 @@ function loadRandomSlide(attempts=0) {{
     preloadNext();
     return;
   }}
-
-  // Safety valve — if the image neither loads nor errors within 6s, move on.
-  const timeout = setTimeout(() => {{
-    isLoadingSlide = false;
-    badSrcs.add(src);
-    loadRandomSlide(attempts + 1);
-  }}, 6000);
 
   loader.onload = () => {{
     clearTimeout(timeout);
