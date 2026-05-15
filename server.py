@@ -1446,7 +1446,14 @@ def render_html():
 <head>
 <meta charset="utf-8">
 <title>misshurry</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="misshurry">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
@@ -1457,6 +1464,9 @@ canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 <div id="debug-url"></div>
 <canvas id="view"></canvas>
 <script>
+if ('serviceWorker' in navigator) {{
+  navigator.serviceWorker.register('/sw.js').catch(() => {{}});
+}}
 let slides = {sequence_json};
 const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
 const canvas = document.getElementById("view");
@@ -1655,7 +1665,7 @@ resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); pre
   }}, 5000);
 }})();
 
-// Poll /images.json — first attempt after 3 s, then every 30 s.
+// Poll /images.json — first attempt after 1 s, then every 30 s.
 (function pollImages() {{
   async function refresh() {{
     try {{
@@ -1676,16 +1686,17 @@ resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); pre
             refillPool();
             if (!currentImage) loadRandomSlide();
           }}
-          setTimeout(refresh, 30000);
+          // If we have enough images settle into 30s polling, else retry sooner.
+          setTimeout(refresh, slides.length > 50 ? 30000 : 3000);
         }} else {{
-          setTimeout(refresh, 4000);
+          setTimeout(refresh, 2000);
         }}
       }} else {{
-        setTimeout(refresh, 4000);
+        setTimeout(refresh, 2000);
       }}
-    }} catch(e) {{ setTimeout(refresh, 4000); }}
+    }} catch(e) {{ setTimeout(refresh, 2000); }}
   }}
-  setTimeout(refresh, 3000);
+  setTimeout(refresh, 1000);
 }})();
 </script>
 </body>
@@ -1729,16 +1740,75 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/images.json":
             with IMAGE_CACHE["lock"]:
                 cached = IMAGE_CACHE["images"][:]
-            # AP dims URLs are auto-approved — always include them.
-            # For other sources, only include if pre-vetting has approved them.
+            # Always include AP dims URLs immediately — they're auto-approved.
+            # Include other sources only once pre-vetting has approved them.
+            # If APPROVED_URLS is empty (first boot), return everything so client isn't blank.
             if APPROVED_URLS:
-                cached = [img for img in cached if img in APPROVED_URLS or "dims.apnews.com" in img]
+                cached = [img for img in cached
+                         if "dims.apnews.com" in img or img in APPROVED_URLS]
             sequence = []
             for img in cached:
                 proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
                 sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
             data = json.dumps(sequence).encode("utf-8")
             self.safe_send_bytes(200, data, "application/json; charset=utf-8", {"Cache-Control": "no-store"})
+            return
+
+        if path == "/manifest.json":
+            manifest = json.dumps({
+                "name": "misshurry",
+                "short_name": "misshurry",
+                "description": "news images through a flashlight",
+                "start_url": "/",
+                "display": "fullscreen",
+                "orientation": "any",
+                "background_color": "#000000",
+                "theme_color": "#000000",
+                "icons": [
+                    {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                    {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                ]
+            }).encode("utf-8")
+            self.safe_send_bytes(200, manifest, "application/manifest+json", {"Cache-Control": "public, max-age=3600"})
+            return
+
+        if path == "/sw.js":
+            sw = (
+                "self.addEventListener('install', e => self.skipWaiting());\n"
+                "self.addEventListener('activate', e => clients.claim());\n"
+                "self.addEventListener('fetch', e => {\n"
+                "  if (e.request.url.endsWith('/') || e.request.url.endsWith('/index.html')) {\n"
+                "    e.respondWith(fetch(e.request));\n"
+                "  }\n"
+                "});\n"
+            ).encode("utf-8")
+            self.safe_send_bytes(200, sw, "application/javascript", {"Cache-Control": "no-cache"})
+            return
+
+        if path in ["/icon-192.png", "/icon-512.png"]:
+            size = 512 if "512" in path else 192
+            # Generate a simple black square with white text as the icon.
+            try:
+                import struct, zlib
+                def make_icon(size):
+                    img_data = []
+                    for y in range(size):
+                        row = [0, 0, 0, 255] * size  # black RGBA
+                        img_data.append(bytes([0]) + bytes(row))  # filter byte
+                    raw = b"".join(img_data)
+                    compressed = zlib.compress(raw, 9)
+                    def chunk(name, data):
+                        c = name + data
+                        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
+                    sig = b"\x89PNG\r\n\x1a\n"
+                    ihdr = chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+                    idat = chunk(b"IDAT", compressed)
+                    iend = chunk(b"IEND", b"")
+                    return sig + ihdr + idat + iend
+                icon_data = make_icon(size)
+                self.safe_send_bytes(200, icon_data, "image/png", {"Cache-Control": "public, max-age=86400"})
+            except Exception:
+                self.safe_send_bytes(404, b"icon not found")
             return
 
         if path == "/vetted.json":
