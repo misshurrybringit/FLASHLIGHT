@@ -1475,18 +1475,16 @@ canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
   display: none;
   position: fixed;
   inset: 0;
-  background: #000;
-  color: rgba(255,255,255,0.5);
-  font: 14px/1.8 monospace;
-  letter-spacing: 0.05em;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
+  background: #fff;
+  color: #000;
+  font: 16px/1.9 "Times New Roman", Times, serif;
+  align-items: flex-start;
+  justify-content: flex-start;
   flex-direction: column;
-  gap: 1.5em;
   z-index: 200;
-  padding: 2em;
+  padding: 2.5em 2em;
   box-sizing: border-box;
+  overflow: hidden;
 }}
 @media (pointer: coarse) and (orientation: portrait) {{
   #rotate-msg {{ display: flex; }}
@@ -1517,16 +1515,88 @@ if (screen.orientation && screen.orientation.lock) {{
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const isAndroid = /android/i.test(navigator.userAgent);
     const el = document.getElementById('install-msg');
-    if (isIOS) {{
-      el.innerHTML = 'misshurry<br><br>tap <span style="font-size:1.3em">⎋</span> share<br>then<br>"add to home screen"';
-    }} else if (isAndroid) {{
-      el.innerHTML = 'misshurry<br><br>tap ⋮ menu<br>then<br>"add to home screen"';
+
+    const iosInstructions = [
+      "misshurry",
+      "",
+      "This is a web app about news images.",
+      "To install it on your phone:",
+      "",
+      "1. Open this page in Safari.",
+      "",
+      "2. Tap the Share button at the",
+      "   bottom of the screen —",
+      "   it looks like a box with an",
+      "   arrow pointing upward.",
+      "",
+      "3. Scroll down in the menu",
+      "   that appears.",
+      "",
+      "4. Tap \u201cAdd to Home Screen\u201d.",
+      "",
+      "5. Tap \u201cAdd\u201d in the top right corner.",
+      "",
+      "6. Find the misshurry icon",
+      "   on your home screen and open it.",
+      "",
+      "7. Turn your phone horizontal.",
+    ];
+
+    const androidInstructions = [
+      "misshurry",
+      "",
+      "This is a web app about news images.",
+      "To install it on your phone:",
+      "",
+      "1. Open this page in Chrome.",
+      "",
+      "2. Tap the three dots \u22ee in the",
+      "   top right corner.",
+      "",
+      "3. Tap \u201cAdd to Home screen\u201d.",
+      "",
+      "4. Tap \u201cAdd\u201d to confirm.",
+      "",
+      "5. Find the misshurry icon",
+      "   on your home screen and open it.",
+      "",
+      "6. Turn your phone horizontal.",
+    ];
+
+    const lines = isIOS ? iosInstructions : isAndroid ? androidInstructions : null;
+    if (!lines) return;
+
+    el.style.display = 'flex';
+
+    // Typewriter effect — natural variable pace.
+    const p = document.createElement('p');
+    p.style.cssText = 'margin:0; white-space:pre-wrap; max-width:340px;';
+    el.appendChild(p);
+
+    const fullText = lines.join('\n');
+    let i = 0;
+
+    function typeNext() {{
+      if (i >= fullText.length) return;
+      const ch = fullText[i++];
+      p.textContent += ch;
+      // Variable pace: slower after punctuation, faster mid-word.
+      let delay = 38;
+      if (ch === '\n') delay = 180;
+      else if (ch === '.' || ch === ',') delay = 220;
+      else if (ch === ' ') delay = 55;
+      else if (Math.random() < 0.08) delay = 90; // occasional hesitation
+      setTimeout(typeNext, delay);
     }}
-    if (isIOS || isAndroid) {{
-      el.style.display = 'flex';
-      // Tap anywhere to dismiss and continue anyway.
-      el.addEventListener('click', () => {{ el.style.display = 'none'; }});
-    }}
+
+    // Small initial pause then start typing.
+    setTimeout(typeNext, 600);
+
+    // Tap to skip to end.
+    el.addEventListener('click', () => {{
+      i = fullText.length;
+      p.textContent = fullText;
+    }});
   }}
 }})();
 
@@ -1746,7 +1816,17 @@ resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); pre
             }}
           }}
           if (added > 0) {{
-            refillPool();
+            // Append new images to the end of the current walk rather than
+            // reshuffling everything — avoids repeating already-seen images.
+            const newSrcs = [];
+            for (const item of fresh) {{
+              if (!badSrcs.has(item.src) && slideAllowedForCurrentOrientation(item)) {{
+                newSrcs.push(item.src);
+              }}
+            }}
+            if (newSrcs.length > 0) {{
+              shuffledPool = shuffledPool.concat(shuffleArray(newSrcs));
+            }}
             if (!currentImage) loadRandomSlide();
           }}
           // If we have enough images settle into 30s polling, else retry sooner.
