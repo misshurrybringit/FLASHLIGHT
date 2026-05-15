@@ -187,7 +187,10 @@ def fetch_guardian_api_images(limit=200):
                 src_match = re.search(r'src="([^"]+)"', img_url)
                 if src_match:
                     img_url = src_match.group(1)
-                # Upgrade to large size — replace width param with 2000.
+                # Skip staff avatars and tiny images.
+                if "/img/uploads/" in img_url or "width=80" in img_url:
+                    continue
+                # Upgrade to large size.
                 img_url = re.sub(r'width=\d+', 'width=2000', img_url)
                 cleaned = clean_extracted_image_url(img_url)
                 if not cleaned or url_is_known_bad(cleaned):
@@ -555,6 +558,11 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             return False
         # media.npr.org is NPR's placeholder/logo domain — real NPR photos use brightspotcdn.
         if "media.npr.org" in lower:
+            return False
+        # Guardian author avatars and small images.
+        if "guim.co.uk" in lower and "/img/uploads/" in lower:
+            return False
+        if "guim.co.uk" in lower and "width=80" in lower:
             return False
         # NPR brightspotcdn URLs with non-news filenames (games, puzzles, podcasts etc).
         if "brightspotcdn" in lower and any(bad in lower for bad in [
