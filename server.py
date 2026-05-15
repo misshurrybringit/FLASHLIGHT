@@ -1458,15 +1458,78 @@ def render_html():
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{ display: none; }}
+#rotate-msg {{
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: #000;
+  color: rgba(255,255,255,0.5);
+  font: 14px/1.6 monospace;
+  letter-spacing: 0.08em;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  z-index: 100;
+}}
+#install-msg {{
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: #000;
+  color: rgba(255,255,255,0.5);
+  font: 14px/1.8 monospace;
+  letter-spacing: 0.05em;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  flex-direction: column;
+  gap: 1.5em;
+  z-index: 200;
+  padding: 2em;
+  box-sizing: border-box;
+}}
+@media (pointer: coarse) and (orientation: portrait) {{
+  #rotate-msg {{ display: flex; }}
+  canvas {{ display: none; }}
+}}
 </style>
 </head>
 <body>
+<div id="install-msg"></div>
+<div id="rotate-msg">turn your phone</div>
 <div id="debug-url"></div>
 <canvas id="view"></canvas>
 <script>
 if ('serviceWorker' in navigator) {{
   navigator.serviceWorker.register('/sw.js').catch(() => {{}});
 }}
+// Try to lock to landscape on mobile when running as PWA.
+if (screen.orientation && screen.orientation.lock) {{
+  screen.orientation.lock('landscape').catch(() => {{}});
+}}
+
+// Show install instructions if on mobile browser (not PWA).
+(function() {{
+  const isMobile = window.matchMedia('(pointer: coarse)').matches;
+  const isPWA = window.matchMedia('(display-mode: fullscreen)').matches
+             || window.navigator.standalone === true;
+  if (isMobile && !isPWA) {{
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isAndroid = /android/i.test(navigator.userAgent);
+    const el = document.getElementById('install-msg');
+    if (isIOS) {{
+      el.innerHTML = 'misshurry<br><br>tap <span style="font-size:1.3em">⎋</span> share<br>then<br>"add to home screen"';
+    }} else if (isAndroid) {{
+      el.innerHTML = 'misshurry<br><br>tap ⋮ menu<br>then<br>"add to home screen"';
+    }}
+    if (isIOS || isAndroid) {{
+      el.style.display = 'flex';
+      // Tap anywhere to dismiss and continue anyway.
+      el.addEventListener('click', () => {{ el.style.display = 'none'; }});
+    }}
+  }}
+}})();
+
 let slides = {sequence_json};
 const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
 const canvas = document.getElementById("view");
@@ -1761,7 +1824,7 @@ class Handler(BaseHTTPRequestHandler):
                 "description": "news images through a flashlight",
                 "start_url": "/",
                 "display": "fullscreen",
-                "orientation": "any",
+                "orientation": "landscape",
                 "background_color": "#000000",
                 "theme_color": "#000000",
                 "icons": [
