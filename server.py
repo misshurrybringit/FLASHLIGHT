@@ -238,6 +238,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "af6c0ee0",
     "11127980",
     "d1e71250",
+    "60b2cc02514450d7361aa7a4c828fd2b830e10a1",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -564,6 +565,8 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             return False
         # Guardian author avatars and small images.
         if "i.guim.co.uk" in lower:
+            return False
+        if "interactive.guim.co.uk" in lower:
             return False
         # NPR brightspotcdn URLs with non-news filenames (games, puzzles, podcasts etc).
         if "brightspotcdn" in lower and any(bad in lower for bad in [
@@ -1078,12 +1081,13 @@ def _pre_vet_one(url):
     if "dims.apnews.com" in url:
         APPROVED_URLS.add(url)
         return
-    # Non-BBC, non-AP sources — approve without cv2 checks.
+    # Non-BBC, non-Guardian sources — approve without cv2 checks.
     is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
-    if not is_bbc:
+    is_guardian = "guim.co.uk" in url or "theguardian.com" in url
+    if not is_bbc and not is_guardian:
         APPROVED_URLS.add(url)
         return
-    # BBC — run full cv2 checks to filter portraits/graphics/PR shots.
+    # BBC and Guardian — run cv2 checks to filter portraits/graphics/dividers.
     try:
         data, content_type = fetch_bytes(url, timeout=8)
         if not content_type.startswith("image/"):
@@ -1118,9 +1122,9 @@ def _pre_vet_one(url):
 def _pre_vet_pool(images):
     """Pre-vet all images in the pool in the background using a thread pool."""
     REJECT_CACHE.clear()
-    APPROVED_URLS.clear()
-    to_vet = images[:]
-    print(f"[BG] Pre-vetting {len(to_vet)} images …", flush=True)
+    # Don't clear APPROVED_URLS — keep previously approved images approved.
+    to_vet = [u for u in images if u not in APPROVED_URLS]
+    print(f"[BG] Pre-vetting {len(to_vet)} new images …", flush=True)
     with ThreadPoolExecutor(max_workers=6) as ex:
         list(ex.map(_pre_vet_one, to_vet))
     print(f"[BG] Pre-vet done. Approved: {len(APPROVED_URLS)}", flush=True)
@@ -1468,8 +1472,17 @@ function refillPool() {{
   }}
 
   if (currentSrc && candidates.length > 1) candidates = candidates.filter(src => src !== currentSrc);
-  let fresh = candidates.filter(src => !recentlyShown.includes(src));
-  if (fresh.length < Math.min(35, candidates.length)) fresh = candidates;
+
+  // Strictly prefer images not recently shown.
+  const recentSet = new Set(recentlyShown);
+  let fresh = candidates.filter(src => !recentSet.has(src));
+
+  // Only fall back to recently-shown when we've genuinely exhausted fresh ones.
+  if (fresh.length < 5) {{
+    fresh = candidates;
+    recentlyShown = []; // reset history when pool is genuinely exhausted
+  }}
+
   shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
 }}
