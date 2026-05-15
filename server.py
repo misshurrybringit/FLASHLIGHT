@@ -1,3 +1,4 @@
+
 import json
 import os
 import random
@@ -1507,10 +1508,60 @@ if (screen.orientation && screen.orientation.lock) {{
 }}
 
 // Show install instructions if on mobile browser (not PWA).
+let _slideshowReady = false;
+function startSlideshow() {{
+  if (_slideshowReady) return;
+  _slideshowReady = true;
+  resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); preloadNext();
+
+  (function tryLoad() {{
+    if (!currentImage) {{ loadRandomSlide(); setTimeout(tryLoad, 1000); }}
+  }})();
+
+  (function waitForFirst() {{
+    if (!currentImage) {{ setTimeout(waitForFirst, 500); return; }}
+    setTimeout(function rotateSlides() {{
+      loadRandomSlide();
+      setTimeout(rotateSlides, 5000);
+    }}, 5000);
+  }})();
+
+  (function pollImages() {{
+    async function refresh() {{
+      try {{
+        const r = await fetch("/images.json");
+        if (r.ok) {{
+          const fresh = await r.json();
+          if (fresh && fresh.length > 0) {{
+            const existingKeys = new Set(slides.map(s => s.src));
+            let added = 0;
+            for (const item of fresh) {{
+              if (!existingKeys.has(item.src)) {{
+                slides.push(item); existingKeys.add(item.src); added++;
+              }}
+            }}
+            if (added > 0) {{
+              const newSrcs = [];
+              for (const item of fresh) {{
+                if (!badSrcs.has(item.src) && slideAllowedForCurrentOrientation(item)) newSrcs.push(item.src);
+              }}
+              if (newSrcs.length > 0) shuffledPool = shuffledPool.concat(shuffleArray(newSrcs));
+              if (!currentImage) loadRandomSlide();
+            }}
+            setTimeout(refresh, slides.length > 50 ? 30000 : 3000);
+          }} else {{ setTimeout(refresh, 2000); }}
+        }} else {{ setTimeout(refresh, 2000); }}
+      }} catch(e) {{ setTimeout(refresh, 2000); }}
+    }}
+    setTimeout(refresh, 1000);
+  }})();
+}}
+
 (function() {{
   const isMobile = window.matchMedia('(pointer: coarse)').matches;
   const isPWA = window.matchMedia('(display-mode: fullscreen)').matches
              || window.navigator.standalone === true;
+
   if (isMobile && !isPWA) {{
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const isAndroid = /android/i.test(navigator.userAgent);
@@ -1525,7 +1576,7 @@ if (screen.orientation && screen.orientation.lock) {{
       "1. Open this page in Safari.",
       "",
       "2. Tap the Share button at the",
-      "   bottom of the screen —",
+      "   bottom of the screen \u2014",
       "   it looks like a box with an",
       "   arrow pointing upward.",
       "",
@@ -1564,11 +1615,10 @@ if (screen.orientation && screen.orientation.lock) {{
     ];
 
     const lines = isIOS ? iosInstructions : isAndroid ? androidInstructions : null;
-    if (!lines) return;
+    if (!lines) {{ startSlideshow(); return; }}
 
     el.style.display = 'flex';
 
-    // Typewriter effect — natural variable pace.
     const p = document.createElement('p');
     p.style.cssText = 'margin:0; white-space:pre-wrap; max-width:340px;';
     el.appendChild(p);
@@ -1577,26 +1627,23 @@ if (screen.orientation && screen.orientation.lock) {{
     let i = 0;
 
     function typeNext() {{
-      if (i >= fullText.length) return;
+      if (i >= fullText.length) {{
+        el.addEventListener('click', () => {{ el.style.display = 'none'; startSlideshow(); }});
+        return;
+      }}
       const ch = fullText[i++];
       p.textContent += ch;
-      // Variable pace: slower after punctuation, faster mid-word.
-      let delay = 38;
-      if (ch === '\n') delay = 180;
-      else if (ch === '.' || ch === ',') delay = 220;
-      else if (ch === ' ') delay = 55;
-      else if (Math.random() < 0.08) delay = 90; // occasional hesitation
+      let delay = 65;
+      if (ch === '\n') delay = 320;
+      else if (ch === '.' || ch === ',') delay = 280;
+      else if (ch === ' ') delay = 80;
+      else if (Math.random() < 0.1) delay = 140;
       setTimeout(typeNext, delay);
     }}
 
-    // Small initial pause then start typing.
-    setTimeout(typeNext, 600);
-
-    // Tap to skip to end.
-    el.addEventListener('click', () => {{
-      i = fullText.length;
-      p.textContent = fullText;
-    }});
+    typeNext();
+  }} else {{
+    startSlideshow();
   }}
 }})();
 
@@ -1776,71 +1823,6 @@ canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
-resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); preloadNext();
-
-// Keep trying to load a slide every second until we have one.
-(function tryLoad() {{
-  if (!currentImage) {{
-    loadRandomSlide();
-    setTimeout(tryLoad, 1000);
-  }}
-}})();
-
-// Only start rotation timer after we have a first image.
-(function waitForFirst() {{
-  if (!currentImage) {{
-    setTimeout(waitForFirst, 500);
-    return;
-  }}
-  setTimeout(function rotateSlides() {{
-    loadRandomSlide();
-    setTimeout(rotateSlides, 5000);
-  }}, 5000);
-}})();
-
-// Poll /images.json — first attempt after 1 s, then every 30 s.
-(function pollImages() {{
-  async function refresh() {{
-    try {{
-      const r = await fetch("/images.json");
-      if (r.ok) {{
-        const fresh = await r.json();
-        if (fresh && fresh.length > 0) {{
-          const existingKeys = new Set(slides.map(s => s.src));
-          let added = 0;
-          for (const item of fresh) {{
-            if (!existingKeys.has(item.src)) {{
-              slides.push(item);
-              existingKeys.add(item.src);
-              added++;
-            }}
-          }}
-          if (added > 0) {{
-            // Append new images to the end of the current walk rather than
-            // reshuffling everything — avoids repeating already-seen images.
-            const newSrcs = [];
-            for (const item of fresh) {{
-              if (!badSrcs.has(item.src) && slideAllowedForCurrentOrientation(item)) {{
-                newSrcs.push(item.src);
-              }}
-            }}
-            if (newSrcs.length > 0) {{
-              shuffledPool = shuffledPool.concat(shuffleArray(newSrcs));
-            }}
-            if (!currentImage) loadRandomSlide();
-          }}
-          // If we have enough images settle into 30s polling, else retry sooner.
-          setTimeout(refresh, slides.length > 50 ? 30000 : 3000);
-        }} else {{
-          setTimeout(refresh, 2000);
-        }}
-      }} else {{
-        setTimeout(refresh, 2000);
-      }}
-    }} catch(e) {{ setTimeout(refresh, 2000); }}
-  }}
-  setTimeout(refresh, 1000);
-}})();
 </script>
 </body>
 </html>'''
