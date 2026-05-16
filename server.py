@@ -920,11 +920,12 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                     link = item.find("link")
                     if link is not None and link.text:
                         found.append((link.text.strip(), "article_link"))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[RSS] {feed_url} error: {e}", flush=True)
         return found
 
     feeds = RSS_FEEDS[:]
+    print(f"[BG] Fetching {len(feeds)} RSS feeds …", flush=True)
     with ThreadPoolExecutor(max_workers=6) as ex:
         feed_futures = {ex.submit(fetch_one_feed, f): f for f in feeds}
         article_links_to_scrape = []
@@ -948,6 +949,8 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                         continue
                     if add_image(url_or_link) and is_bbc:
                         bbc_added += 1
+
+    print(f"[BG] After RSS feeds: {len(images)} images", flush=True)
 
     # Scrape article pages from RSS that had no inline image, in parallel.
     random.shuffle(article_links_to_scrape)
