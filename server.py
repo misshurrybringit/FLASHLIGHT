@@ -1518,7 +1518,7 @@ function startSlideshow() {{
   resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); preloadNext();
 
   (function tryLoad() {{
-    if (!currentImage) {{ loadRandomSlide(); setTimeout(tryLoad, 1000); }}
+    if (!currentImage) {{ loadRandomSlide(); setTimeout(tryLoad, 500); }}
   }})();
 
   // Consistent rotation with preloading.
@@ -1587,7 +1587,7 @@ function startSlideshow() {{
         }} else {{ setTimeout(refresh, 2000); }}
       }} catch(e) {{ setTimeout(refresh, 2000); }}
     }}
-    setTimeout(refresh, 1000);
+    setTimeout(refresh, 0);
   }})();
 }}
 
