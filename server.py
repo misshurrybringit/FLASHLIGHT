@@ -1080,6 +1080,29 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     return ordered[:limit]
 
 
+def _background_pool_refresher():
+    """Continuously rebuild the image pool so the cache is always warm."""
+    refresh_count = 0
+    while True:
+        try:
+            print("[BG] Refreshing image pool …", flush=True)
+            t0 = time.time()
+            if refresh_count % 10 == 0:
+                APPROVED_URLS.clear()
+                print("[BG] Cleared approved URLs for fresh vet", flush=True)
+            refresh_count += 1
+            images = get_bbc_images(limit=MAX_IMAGE_POOL)
+            print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s", flush=True)
+            _pre_cache_seed(images)
+            _pre_vet_pool(images)
+        except Exception as e:
+            import traceback
+            print("[BG] Refresh error:", e, flush=True)
+            traceback.print_exc()
+        sleep_time = 20 if refresh_count <= 3 else BACKGROUND_REFRESH_SECONDS
+        time.sleep(sleep_time)
+
+
 def _pre_cache_seed(images):
     """Pre-fetch and cache the first few AP images so they serve instantly on page load."""
     seed = [img for img in images
