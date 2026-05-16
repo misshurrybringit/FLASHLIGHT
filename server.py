@@ -1450,14 +1450,15 @@ def image_has_center_divider(data):
 
 
 def render_html():
-    # Serve the page immediately with whatever is already cached — or empty if
-    # the background thread hasn't finished its first crawl yet.  The client
-    # will poll /images.json after 2 s and populate the slide pool without
-    # ever blocking this response.
     with IMAGE_CACHE["lock"]:
         cached = IMAGE_CACHE["images"][:]
+    # Embed first 10 AP dims URLs directly — these are safe and load instantly
+    # without waiting for pre-vetting. Rest come via /images.json poll.
+    seed = [img for img in cached if "dims.apnews.com" in img][:10]
+    if not seed:
+        seed = cached[:10]
     sequence = []
-    for img in cached:
+    for img in seed:
         proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
         sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
     sequence_json = json.dumps(sequence).replace('\n', '\\n').replace('\r', '')
