@@ -1,3 +1,4 @@
+
 import json
 import os
 import random
@@ -83,8 +84,8 @@ HEADERS = {
 MAX_IMAGE_POOL = 900
 SEQUENCE_LENGTH = 800
 IMAGE_CACHE = {"time": 0, "images": [], "lock": threading.Lock()}
-CACHE_SECONDS = 60
-BACKGROUND_REFRESH_SECONDS = 60  # pre-warm interval
+CACHE_SECONDS = 120
+BACKGROUND_REFRESH_SECONDS = 120  # pre-warm interval
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 600
@@ -148,7 +149,10 @@ def fetch_guardian_api_images(limit=200):
                         return images
         except Exception as e:
             print(f"[Guardian API] {section} error: {e}", flush=True)
-        time.sleep(0.5)  # avoid rate limiting
+            if "429" in str(e):
+                print("[Guardian API] Rate limited — stopping for this cycle", flush=True)
+                break
+        time.sleep(1.5)  # avoid rate limiting
     print(f"[Guardian API] fetched {len(images)} images", flush=True)
     return images
 
