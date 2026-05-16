@@ -1192,9 +1192,14 @@ def _pre_vet_one(url):
 def _pre_vet_pool(images):
     """Pre-vet all images in the pool in the background using a thread pool."""
     REJECT_CACHE.clear()
-    # Don't clear APPROVED_URLS — keep previously approved images approved.
+    # Auto-approve AP dims URLs immediately so they're available before full vet completes.
+    for url in images:
+        if "dims.apnews.com" in url and not url_is_known_bad(url):
+            APPROVED_URLS.add(url)
+    print(f"[BG] Auto-approved {len(APPROVED_URLS)} AP dims URLs", flush=True)
+    # Only vet non-AP URLs (BBC, Guardian) through cv2.
     to_vet = [u for u in images if u not in APPROVED_URLS]
-    print(f"[BG] Pre-vetting {len(to_vet)} new images …", flush=True)
+    print(f"[BG] Pre-vetting {len(to_vet)} non-AP images …", flush=True)
     with ThreadPoolExecutor(max_workers=6) as ex:
         list(ex.map(_pre_vet_one, to_vet))
     print(f"[BG] Pre-vet done. Approved: {len(APPROVED_URLS)}", flush=True)
