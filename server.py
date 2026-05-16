@@ -45,7 +45,7 @@ RSS_FEEDS = [
     # Al Jazeera English RSS — images served from img.aljazeera.net CDN which is open.
     "https://www.aljazeera.com/xml/rss/all.xml",
 
-    # Der Spiegel International — strong photojournalism.
+    # Der Spiegel International — backup source, lower priority.
     "https://www.spiegel.de/international/index.rss",
 
     # Reuters/misc via Yahoo News.
@@ -858,34 +858,35 @@ def source_category(url):
         return "guardian"
     if "npr" in lower or "brightspotcdn" in lower:
         return "npr"
+    if "spiegel.de" in lower:
+        return "spiegel"
     if "bbci.co.uk" in lower or "bbc.co.uk" in lower:
         return "bbc"
     return "other"
 
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Favor AP/Reuters/other non-BBC images so BBC cannot flood the final pool."""
-    buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "bbc": [], "other": []}
+    """Favor AP/Guardian images; Spiegel and BBC as backup."""
+    buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "spiegel": [], "bbc": [], "other": []}
     for img in images:
         buckets.setdefault(source_category(img), []).append(img)
 
     for bucket in buckets.values():
         random.shuffle(bucket)
 
-    # Keep this intentionally AP-heavy. If AP returns fewer images, the other
-    # buckets fill the rest without causing errors.
     mixed = (
         buckets["ap"][:700]
         + buckets["reuters"][:300]
         + buckets["guardian"][:300]
         + buckets["other"][:200]
+        + buckets["spiegel"][:100]
         + buckets["bbc"][:60]
     )
 
     bbc_in_mixed = sum(1 for i in mixed if source_category(i) == "bbc")
     remaining = []
     already = set(canonical_image_key(i) for i in mixed)
-    for name in ["ap", "reuters", "guardian", "npr", "other"]:
+    for name in ["ap", "reuters", "guardian", "npr", "other", "spiegel"]:
         for img in buckets[name]:
             key = canonical_image_key(img)
             if key not in already:
@@ -944,28 +945,22 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             break
         add_image(img)
 
-    # Try AP's JSON content API first — most reliable source of dims URLs.
+    # Fetch AP hubs and Guardian API in parallel for fastest pool build.
     def fetch_hub(slug):
         return fetch_ap_hub_images(slug, limit=40)
 
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    with ThreadPoolExecutor(max_workers=8) as ex:
         hub_futures = {ex.submit(fetch_hub, slug): slug for slug in AP_HUB_SLUGS}
-        for fut in as_completed(hub_futures):
+        guardian_future = ex.submit(fetch_guardian_api_images, 400)
+
+        for fut in as_completed(list(hub_futures.keys()) + [guardian_future]):
             try:
                 for img in fut.result():
                     add_image(img)
             except Exception:
                 pass
 
-    print(f"[BG] After AP JSON API: {len(images)} images", flush=True)
-
-    # Guardian open content API — structured image URLs, no scraping.
-    try:
-        for img in fetch_guardian_api_images(limit=400):
-            add_image(img)
-        print(f"[BG] After Guardian API: {len(images)} images", flush=True)
-    except Exception as e:
-        print(f"[BG] Guardian API error: {e}", flush=True)
+    print(f"[BG] After AP + Guardian APIs: {len(images)} images", flush=True)
 
     # Wikimedia current events images — freely licensed documentary photos.
     try:
@@ -1631,7 +1626,8 @@ const _shownThisCycle = new Set();
 function sourceScore(src) {{
   if (src.includes('dims.apnews.com')) return 0;
   if (src.includes('guim.co.uk')) return 1;
-  if (src.includes('bbci.co.uk')) return 2;
+  if (src.includes('spiegel.de')) return 2;
+  if (src.includes('bbci.co.uk')) return 3;
   return 1;
 }}
 function refillPool() {{
@@ -1654,9 +1650,9 @@ function refillPool() {{
   }}
 
   // AP images first (newest stories), then shuffle Guardian/BBC within their groups.
-  const groups = [0, 1, 2].map(score => {{
+  const groups = [0, 1, 2, 3].map(score => {{
     const group = fresh.filter(src => sourceScore(src) === score);
-    return score === 0 ? group : shuffleArray(group); // keep AP in feed order
+    return score === 0 ? group : shuffleArray(group);
   }});
   shuffledPool = groups.flat();
   poolIndex = 0;
