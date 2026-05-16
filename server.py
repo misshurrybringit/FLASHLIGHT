@@ -145,8 +145,8 @@ CACHE_SECONDS = 120
 BACKGROUND_REFRESH_SECONDS = 120  # pre-warm interval
 
 PROXY_CACHE = {}
-PROXY_CACHE_SECONDS = 120
-PROXY_CACHE_MAX_ITEMS = 80
+PROXY_CACHE_SECONDS = 600
+PROXY_CACHE_MAX_ITEMS = 200
 
 REJECT_CACHE = {}
 REJECT_CACHE_SECONDS = 1800
@@ -354,7 +354,13 @@ def fetch_text(url, timeout=3):
 
 
 def fetch_bytes(url, timeout=8):
-    req = urllib.request.Request(url, headers=HEADERS)
+    headers = dict(HEADERS)
+    if "apnews.com" in url:
+        headers["Referer"] = "https://apnews.com/"
+        headers["Origin"] = "https://apnews.com"
+    elif "guim.co.uk" in url or "theguardian.com" in url:
+        headers["Referer"] = "https://www.theguardian.com/"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as response:
         return response.read(), response.headers.get("Content-Type", "application/octet-stream")
 
@@ -1580,6 +1586,7 @@ function shuffleArray(arr) {{ const a=arr.slice(); for(let i=a.length-1;i>0;i--)
 function isVerticalPhone() {{ return window.matchMedia("(pointer: coarse)").matches && window.innerHeight > window.innerWidth; }}
 function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly && !isVerticalPhone()); }}
 const badSrcs = new Set();
+const _shownThisCycle = new Set();
 function refillPool() {{
   let candidates = slides
     .filter(slideAllowedForCurrentOrientation)
@@ -1591,9 +1598,17 @@ function refillPool() {{
     candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
   }}
 
-  // Shuffle the full pool and walk through it sequentially.
-  // Only reshuffle when we've gone through everything — no repeats until full cycle.
-  shuffledPool = shuffleArray(candidates);
+  // Deduplicate.
+  candidates = [...new Set(candidates)];
+
+  // Prefer unseen this cycle.
+  let fresh = candidates.filter(src => !_shownThisCycle.has(src));
+  if (fresh.length < 5) {{
+    _shownThisCycle.clear();
+    fresh = candidates;
+  }}
+
+  shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
 }}
 function getNextRandomSrc() {{
@@ -1654,6 +1669,7 @@ function drawFlashlight() {{
 function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
   recentlyShown.push(src); if (recentlyShown.length > RECENT_LIMIT) recentlyShown.shift();
+  _shownThisCycle.add(src);
   const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
   const usableEstimate = Math.max(0, slides.length - badSrcs.size);
   const el = document.getElementById("debug-url");
@@ -1727,11 +1743,12 @@ function loadRandomSlide(attempts=0) {{
 
   loader.src = src;
 }}
-function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; drawFlashlight(); }}
+let _rafPending = false;
+function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; if (!_rafPending) {{ _rafPending = true; requestAnimationFrame(() => {{ _rafPending = false; drawFlashlight(); }}); }} }}
 canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
-window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
+window.addEventListener("resize", () => {{ resizeCanvas(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
 
 // Failsafe — always start slideshow on desktop regardless of install screen logic.
 if (!window.matchMedia('(pointer: coarse)').matches) {{ startSlideshow(); }}
