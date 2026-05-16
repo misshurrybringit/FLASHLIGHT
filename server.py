@@ -1733,6 +1733,19 @@ const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); refillPool(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
 
+// Failsafe — always start slideshow on desktop regardless of install screen logic.
+if (!window.matchMedia('(pointer: coarse)').matches) {{ startSlideshow(); }}
+
+// On mobile, start slideshow when rotated to landscape.
+window.addEventListener('orientationchange', () => {{
+  setTimeout(() => {{
+    if (window.innerWidth > window.innerHeight) {{
+      startSlideshow();
+      if (currentImage) {{ resizeCanvas(); currentPrepared = makeImage(currentImage); drawFlashlight(); }}
+    }}
+  }}, 100);
+}});
+
 // Install screen + slideshow startup — runs after all variables/functions defined.
 (function() {{
   const isMobile = window.matchMedia('(pointer: coarse)').matches;
