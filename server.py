@@ -17,11 +17,7 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
-    # BBC: world and top news only — in_pictures pulls too much entertainment.
-    "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://feeds.bbci.co.uk/news/rss.xml",
-
-    # AP feeds — world/politics/news only, no entertainment or sports.
+    # AP feeds — the only reliable wire source.
     "https://feeds.apnews.com/rss/apf-topnews",
     "https://feeds.apnews.com/rss/apf-WorldNews",
     "https://feeds.apnews.com/rss/apf-usnews",
@@ -33,24 +29,15 @@ RSS_FEEDS = [
     "https://feeds.apnews.com/rss/apf-latinamerica",
     "https://feeds.apnews.com/rss/apf-middleeast",
 
-    # Guardian.
-    "https://www.theguardian.com/world/rss",
-    "https://www.theguardian.com/us-news/rss",
-    "https://www.theguardian.com/uk-news/rss",
-    "https://www.theguardian.com/world/middleeast/rss",
-    "https://www.theguardian.com/world/europe-news/rss",
-    "https://www.theguardian.com/world/asia/rss",
-    "https://www.theguardian.com/world/africa/rss",
-
-    # Al Jazeera English RSS — images served from img.aljazeera.net CDN which is open.
+    # Al Jazeera — was working before.
     "https://www.aljazeera.com/xml/rss/all.xml",
 
-    # Der Spiegel International — backup source, lower priority.
-    "https://www.spiegel.de/international/index.rss",
+    # BBC: backup only, capped low.
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://feeds.bbci.co.uk/news/rss.xml",
 
-    # Reuters/misc via Yahoo News.
-    "https://news.yahoo.com/rss/world",
-    "https://news.yahoo.com/rss/us",
+    # Der Spiegel — backup.
+    "https://www.spiegel.de/international/index.rss",
 ]
 
 SOURCE_PAGES = [
@@ -79,63 +66,18 @@ SOURCE_PAGES = [
 
 # Direct public section pages. These are scraped for image URLs because several
 # non-BBC sources do not expose usable images through RSS.
-DIRECT_IMAGE_PAGES = [
-    # AP: direct section + hub pages, multiple pages each.
-    "https://apnews.com/",
-    "https://apnews.com/world-news",
-    "https://apnews.com/us-news",
-    "https://apnews.com/politics",
-    "https://apnews.com/hub/ap-top-news",
-    "https://apnews.com/hub/world-news",
-    "https://apnews.com/hub/us-news",
-    "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/middle-east",
-    "https://apnews.com/hub/europe",
-    "https://apnews.com/hub/africa",
-    "https://apnews.com/hub/latin-america",
-    "https://apnews.com/hub/asia-pacific",
-    "https://apnews.com/hub/immigration",
-    "https://apnews.com/hub/elections",
-    "https://apnews.com/hub/russia-ukraine",
-    "https://apnews.com/hub/israel-hamas-war",
-    "https://apnews.com/hub/china",
-    "https://apnews.com/hub/india",
-    "https://apnews.com/hub/iran",
-    "https://apnews.com/hub/mexico",
-    "https://apnews.com/hub/climate-and-environment",
-    "https://apnews.com/hub/disasters",
-    "https://apnews.com/hub/photos",
-    "https://apnews.com/hub/ap-images",
-    # Page 2+ for high-volume hubs.
-    "https://apnews.com/hub/world-news?page=2",
-    "https://apnews.com/hub/world-news?page=3",
-    "https://apnews.com/hub/ap-top-news?page=2",
-    "https://apnews.com/hub/ap-top-news?page=3",
-    "https://apnews.com/hub/us-news?page=2",
-    "https://apnews.com/hub/middle-east?page=2",
-    "https://apnews.com/hub/europe?page=2",
-    "https://apnews.com/hub/asia-pacific?page=2",
-    "https://apnews.com/hub/photos?page=2",
-    "https://apnews.com/hub/photos?page=3",
+DIRECT_IMAGE_PAGES = []
 
-    # Reuters regional world pages.
-    "https://www.reuters.com/world/",
-    "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/world/europe/",
-    "https://www.reuters.com/world/asia-pacific/",
-    "https://www.reuters.com/world/middle-east/",
-    "https://www.reuters.com/world/africa/",
-    "https://www.reuters.com/pictures/",
-
-    # Guardian world news.
-    "https://www.theguardian.com/world",
-    "https://www.theguardian.com/us-news",
-]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:150.0) Gecko/20100101 Firefox/150.0",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Sec-Fetch-Dest": "image",
+    "Sec-Fetch-Mode": "no-cors",
+    "Sec-Fetch-Site": "cross-site",
 }
 
 MAX_IMAGE_POOL = 900
@@ -159,6 +101,8 @@ GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics", "environment",
     "global-development", "immigration", "conflict",
     "inequality", "cities", "science",
+    "law", "society", "education", "media",
+    "business", "technology", "international",
 ]
 
 
@@ -945,30 +889,18 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             break
         add_image(img)
 
-    # Fetch AP hubs and Guardian API in parallel for fastest pool build.
-    def fetch_hub(slug):
-        return fetch_ap_hub_images(slug, limit=40)
-
+    # Fetch Guardian API and RSS feeds in parallel.
     with ThreadPoolExecutor(max_workers=8) as ex:
-        hub_futures = {ex.submit(fetch_hub, slug): slug for slug in AP_HUB_SLUGS}
-        guardian_future = ex.submit(fetch_guardian_api_images, 400)
-
-        for fut in as_completed(list(hub_futures.keys()) + [guardian_future]):
+        guardian_future = ex.submit(fetch_guardian_api_images, 600)
+        wikimedia_future = ex.submit(fetch_wikimedia_news_images, 60)
+        for fut in as_completed([guardian_future, wikimedia_future]):
             try:
                 for img in fut.result():
                     add_image(img)
             except Exception:
                 pass
 
-    print(f"[BG] After AP + Guardian APIs: {len(images)} images", flush=True)
-
-    # Wikimedia current events images — freely licensed documentary photos.
-    try:
-        for img in fetch_wikimedia_news_images(limit=60):
-            add_image(img)
-        print(f"[BG] After Wikimedia: {len(images)} images", flush=True)
-    except Exception as e:
-        print("[BG] Wikimedia error:", e, flush=True)
+    print(f"[BG] After Guardian + Wikimedia APIs: {len(images)} images", flush=True)
 
     def fetch_one_feed(feed_url):
         """Fetch one RSS feed and return list of image URLs found."""
@@ -998,20 +930,26 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     with ThreadPoolExecutor(max_workers=6) as ex:
         feed_futures = {ex.submit(fetch_one_feed, f): f for f in feeds}
         article_links_to_scrape = []
+        # Collect all results, process non-BBC first to fill pool before BBC cap.
+        results = []
         for fut in as_completed(feed_futures):
             try:
-                for item in fut.result():
-                    url_or_link, kind = item
-                    if kind == "article_link":
-                        article_links_to_scrape.append(url_or_link)
-                    else:
-                        is_bbc = kind
-                        if is_bbc and bbc_added >= max_bbc_images:
-                            continue
-                        if add_image(url_or_link) and is_bbc:
-                            bbc_added += 1
+                results.append((feed_futures[fut], fut.result()))
             except Exception:
                 pass
+        # Sort: non-BBC feeds first.
+        results.sort(key=lambda x: 1 if is_bbc_feed_url(x[0]) else 0)
+        for feed_url, items in results:
+            for item in items:
+                url_or_link, kind = item
+                if kind == "article_link":
+                    article_links_to_scrape.append(url_or_link)
+                else:
+                    is_bbc = kind
+                    if is_bbc and bbc_added >= max_bbc_images:
+                        continue
+                    if add_image(url_or_link) and is_bbc:
+                        bbc_added += 1
 
     # Scrape article pages from RSS that had no inline image, in parallel.
     random.shuffle(article_links_to_scrape)
@@ -1719,7 +1657,7 @@ function drawFlashlight() {{
   if (!currentPrepared) {{ drawFallbackMessage(); return; }}
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const minDim = Math.min(canvas.width, canvas.height);
-  const radius = minDim * (isTouchDevice ? 0.18 : 0.12);
+  const radius = minDim * (isTouchDevice ? 0.18 : 0.16);
   ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
   cutout.addColorStop(0.00,"rgba(255,248,190,1.00)"); cutout.addColorStop(0.20,"rgba(255,238,150,0.84)"); cutout.addColorStop(0.50,"rgba(255,220,95,0.46)"); cutout.addColorStop(0.82,"rgba(255,200,55,0.18)"); cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
@@ -1979,13 +1917,15 @@ class Handler(BaseHTTPRequestHandler):
             if rejected and time.time() - rejected["time"] < REJECT_CACHE_SECONDS:
                 self.safe_send_bytes(415, b"Rejected", extra_headers={"Cache-Control": "no-store"})
                 return
-            cleanup_proxy_cache()
+            # AP dims URLs — try to fetch, cache successes, fail fast on errors.
             cached = PROXY_CACHE.get(url)
             if cached and time.time() - cached["time"] < PROXY_CACHE_SECONDS:
                 self.safe_send_bytes(200, cached["data"], cached["content_type"], {"Cache-Control": "public, max-age=300"})
                 return
             try:
-                data, content_type = fetch_bytes(url, timeout=8)
+                # Use shorter timeout for AP dims — they often 403 slowly.
+                timeout = 3 if "dims.apnews.com" in url else 8
+                data, content_type = fetch_bytes(url, timeout=timeout)
                 if not content_type.startswith("image/"):
                     REJECT_CACHE[url] = {"time": time.time()}
                     self.safe_send_bytes(415, b"Not an image", extra_headers={"Cache-Control": "no-store"})
