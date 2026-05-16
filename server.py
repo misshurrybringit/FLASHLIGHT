@@ -1902,7 +1902,7 @@ window.addEventListener('orientationchange', () => {{
     p.style.cssText = 'margin:0; white-space:pre-wrap; max-width:340px;';
     el.appendChild(p);
 
-    const fullText = lines.join('\n');
+    const fullText = lines.join('\\n');
     let i = 0;
 
     function typeNext() {{
@@ -1913,7 +1913,7 @@ window.addEventListener('orientationchange', () => {{
       const ch = fullText[i++];
       p.textContent += ch;
       let delay = 65;
-      if (ch === '\n') delay = 320;
+      if (ch === '\\n') delay = 320;
       else if (ch === '.' || ch === ',') delay = 280;
       else if (ch === ' ') delay = 80;
       else if (Math.random() < 0.1) delay = 140;
