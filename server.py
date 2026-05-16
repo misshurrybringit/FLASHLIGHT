@@ -99,10 +99,7 @@ APPROVED_URLS = set()
 GUARDIAN_API_KEY = "66bece60-5ad3-4d04-9f77-d27e8a4122c2"
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics", "environment",
-    "global-development", "immigration", "conflict",
-    "inequality", "cities", "science",
-    "law", "society", "education", "media",
-    "business", "technology", "international",
+    "global-development", "immigration",
 ]
 
 
@@ -151,6 +148,7 @@ def fetch_guardian_api_images(limit=200):
                         return images
         except Exception as e:
             print(f"[Guardian API] {section} error: {e}", flush=True)
+        time.sleep(0.5)  # avoid rate limiting
     print(f"[Guardian API] fetched {len(images)} images", flush=True)
     return images
 
@@ -1032,8 +1030,7 @@ def _background_pool_refresher():
             import traceback
             print("[BG] Refresh error:", e, flush=True)
             traceback.print_exc()
-        sleep_time = 20 if refresh_count <= 3 else BACKGROUND_REFRESH_SECONDS
-        time.sleep(sleep_time)
+        time.sleep(BACKGROUND_REFRESH_SECONDS)
 
 
 def _pre_cache_seed(images):
@@ -1917,15 +1914,23 @@ class Handler(BaseHTTPRequestHandler):
             if rejected and time.time() - rejected["time"] < REJECT_CACHE_SECONDS:
                 self.safe_send_bytes(415, b"Rejected", extra_headers={"Cache-Control": "no-store"})
                 return
-            # AP dims URLs — try to fetch, cache successes, fail fast on errors.
+            # AP dims URLs consistently 403 from datacenter IPs.
+            # Only serve from proxy cache (pre-cached at pool build time), otherwise skip.
+            if "dims.apnews.com" in url:
+                cached = PROXY_CACHE.get(url)
+                if cached and time.time() - cached["time"] < PROXY_CACHE_SECONDS:
+                    self.safe_send_bytes(200, cached["data"], cached["content_type"], {"Cache-Control": "public, max-age=300"})
+                    return
+                REJECT_CACHE[url] = {"time": time.time()}
+                self.safe_send_bytes(415, b"AP not in cache", extra_headers={"Cache-Control": "no-store"})
+                return
+
             cached = PROXY_CACHE.get(url)
             if cached and time.time() - cached["time"] < PROXY_CACHE_SECONDS:
                 self.safe_send_bytes(200, cached["data"], cached["content_type"], {"Cache-Control": "public, max-age=300"})
                 return
             try:
-                # Use shorter timeout for AP dims — they often 403 slowly.
-                timeout = 3 if "dims.apnews.com" in url else 8
-                data, content_type = fetch_bytes(url, timeout=timeout)
+                data, content_type = fetch_bytes(url, timeout=8)
                 if not content_type.startswith("image/"):
                     REJECT_CACHE[url] = {"time": time.time()}
                     self.safe_send_bytes(415, b"Not an image", extra_headers={"Cache-Control": "no-store"})
