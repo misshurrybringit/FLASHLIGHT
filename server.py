@@ -1440,7 +1440,7 @@ def render_html():
     for img in cached:
         proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
         sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
-    sequence_json = json.dumps(sequence)
+    sequence_json = json.dumps(sequence).replace('\n', '\\n').replace('\r', '')
     return f'''<!DOCTYPE html>
 <html>
 <head>
