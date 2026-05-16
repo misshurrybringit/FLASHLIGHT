@@ -157,7 +157,8 @@ APPROVED_URLS = set()
 GUARDIAN_API_KEY = "66bece60-5ad3-4d04-9f77-d27e8a4122c2"
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics", "environment",
-    "global-development", "immigration",
+    "global-development", "immigration", "conflict",
+    "inequality", "cities", "science",
 ]
 
 
@@ -765,6 +766,8 @@ AP_HUB_SLUGS = [
     "asia-pacific", "russia-ukraine", "israel-hamas-war",
     "climate-and-environment", "disasters", "photos",
     "immigration", "china", "india", "iran", "mexico",
+    "united-nations", "nato", "human-rights", "refugees",
+    "war-and-conflict", "economy", "health",
 ]
 
 
@@ -958,7 +961,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
     # Guardian open content API — structured image URLs, no scraping.
     try:
-        for img in fetch_guardian_api_images(limit=200):
+        for img in fetch_guardian_api_images(limit=400):
             add_image(img)
         print(f"[BG] After Guardian API: {len(images)} images", flush=True)
     except Exception as e:
@@ -1081,7 +1084,7 @@ def _pre_cache_seed(images):
     """Pre-fetch and cache the first few AP images so they serve instantly on page load."""
     seed = [img for img in images
             if "dims.apnews.com" in img
-            and not url_is_known_bad(img)][:10]
+            and not url_is_known_bad(img)][:20]
     print(f"[BG] Pre-caching {len(seed)} seed images …", flush=True)
     for url in seed:
         if url in PROXY_CACHE:
@@ -1112,7 +1115,9 @@ def _pre_cache_seed(images):
             import traceback
             print("[BG] Refresh error:", e, flush=True)
             traceback.print_exc()
-        time.sleep(BACKGROUND_REFRESH_SECONDS)
+        # First 3 cycles: refresh every 20s to build pool fast, then every 60s.
+        sleep_time = 20 if refresh_count <= 3 else BACKGROUND_REFRESH_SECONDS
+        time.sleep(sleep_time)
 
 
 def _pre_vet_one(url):
