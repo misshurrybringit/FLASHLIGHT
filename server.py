@@ -1523,12 +1523,43 @@ function startSlideshow() {{
     if (!currentImage) {{ loadRandomSlide(); setTimeout(tryLoad, 1000); }}
   }})();
 
+  // Consistent rotation with preloading.
+  const SLIDE_INTERVAL = 5000;
+  let _nextPreloaded = null;
+  let _nextSrc = null;
+
+  function prepareNextSlide() {{
+    const src = getNextRandomSrc();
+    if (!src) return;
+    _nextSrc = src;
+    _nextPreloaded = null;
+    const img = new Image();
+    img.onload = () => {{ _nextPreloaded = img; }};
+    img.onerror = () => {{ badSrcs.add(src); _nextSrc = null; prepareNextSlide(); }};
+    img.src = src;
+  }}
+
+  function rotateSlides() {{
+    if (_nextPreloaded && _nextSrc) {{
+      if (!isVerticalPhone() && _nextPreloaded.naturalHeight > _nextPreloaded.naturalWidth * 1.08) {{
+        badSrcs.add(_nextSrc);
+        _nextSrc = null; _nextPreloaded = null;
+        prepareNextSlide();
+      }} else {{
+        prepareAndDraw(_nextPreloaded, _nextSrc);
+        _nextSrc = null; _nextPreloaded = null;
+      }}
+    }} else {{
+      loadRandomSlide();
+    }}
+    prepareNextSlide();
+    setTimeout(rotateSlides, SLIDE_INTERVAL);
+  }}
+
   (function waitForFirst() {{
     if (!currentImage) {{ setTimeout(waitForFirst, 500); return; }}
-    setTimeout(function rotateSlides() {{
-      loadRandomSlide();
-      setTimeout(rotateSlides, 5000);
-    }}, 5000);
+    prepareNextSlide();
+    setTimeout(rotateSlides, SLIDE_INTERVAL);
   }})();
 
   (function pollImages() {{
@@ -1587,6 +1618,12 @@ function isVerticalPhone() {{ return window.matchMedia("(pointer: coarse)").matc
 function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly && !isVerticalPhone()); }}
 const badSrcs = new Set();
 const _shownThisCycle = new Set();
+function sourceScore(src) {{
+  if (src.includes('dims.apnews.com')) return 0;
+  if (src.includes('guim.co.uk')) return 1;
+  if (src.includes('bbci.co.uk')) return 2;
+  return 1;
+}}
 function refillPool() {{
   let candidates = slides
     .filter(slideAllowedForCurrentOrientation)
@@ -1598,17 +1635,17 @@ function refillPool() {{
     candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
   }}
 
-  // Deduplicate.
   candidates = [...new Set(candidates)];
 
-  // Prefer unseen this cycle.
   let fresh = candidates.filter(src => !_shownThisCycle.has(src));
   if (fresh.length < 5) {{
     _shownThisCycle.clear();
     fresh = candidates;
   }}
 
-  shuffledPool = shuffleArray(fresh);
+  // Sort by source relevance then shuffle within each group.
+  const groups = [0, 1, 2].map(score => shuffleArray(fresh.filter(src => sourceScore(src) === score)));
+  shuffledPool = groups.flat();
   poolIndex = 0;
 }}
 function getNextRandomSrc() {{
