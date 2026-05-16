@@ -1077,7 +1077,22 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     return ordered[:limit]
 
 
-def _background_pool_refresher():
+def _pre_cache_seed(images):
+    """Pre-fetch and cache the first few AP images so they serve instantly on page load."""
+    seed = [img for img in images
+            if "dims.apnews.com" in img
+            and not url_is_known_bad(img)][:10]
+    print(f"[BG] Pre-caching {len(seed)} seed images …", flush=True)
+    for url in seed:
+        if url in PROXY_CACHE:
+            continue
+        try:
+            data, content_type = fetch_bytes(url, timeout=8)
+            if content_type.startswith("image/") and len(data) > 10000:
+                PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
+        except Exception:
+            pass
+    print(f"[BG] Seed pre-cached.", flush=True)
     """Continuously rebuild the image pool so the cache is always warm."""
     refresh_count = 0
     while True:
@@ -1091,6 +1106,7 @@ def _background_pool_refresher():
             refresh_count += 1
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
             print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s", flush=True)
+            _pre_cache_seed(images)
             _pre_vet_pool(images)
         except Exception as e:
             import traceback
@@ -1454,9 +1470,15 @@ def render_html():
         cached = IMAGE_CACHE["images"][:]
     # Embed first 10 AP dims URLs directly — these are safe and load instantly
     # without waiting for pre-vetting. Rest come via /images.json poll.
-    seed = [img for img in cached if "dims.apnews.com" in img][:10]
+    seed = [img for img in cached 
+            if "dims.apnews.com" in img 
+            and not url_is_known_bad(img)
+            and img not in REJECT_CACHE][:10]
     if not seed:
-        seed = cached[:10]
+        seed = [img for img in cached 
+                if not url_is_known_bad(img) 
+                and img not in REJECT_CACHE
+                and img in APPROVED_URLS][:10]
     sequence = []
     for img in seed:
         proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
