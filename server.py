@@ -141,8 +141,8 @@ HEADERS = {
 MAX_IMAGE_POOL = 900
 SEQUENCE_LENGTH = 800
 IMAGE_CACHE = {"time": 0, "images": [], "lock": threading.Lock()}
-CACHE_SECONDS = 120
-BACKGROUND_REFRESH_SECONDS = 120  # pre-warm interval
+CACHE_SECONDS = 60
+BACKGROUND_REFRESH_SECONDS = 60  # pre-warm interval
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 600
@@ -1061,7 +1061,15 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             except Exception:
                 pass
 
-    ordered = weighted_image_mix(images, limit=limit)
+    # Sort by source then preserve feed order (newest first within each source).
+    # AP comes first since it updates most frequently.
+    ap_imgs = [img for img in images if source_category(img) == "ap"]
+    guardian_imgs = [img for img in images if source_category(img) == "guardian"]
+    other_imgs = [img for img in images if source_category(img) not in ("ap", "guardian", "bbc")]
+    bbc_imgs = [img for img in images if source_category(img) == "bbc"]
+
+    # Within each source, images were added in feed order (newest first) — preserve that.
+    ordered = ap_imgs + guardian_imgs + other_imgs + bbc_imgs
 
     with IMAGE_CACHE["lock"]:
         IMAGE_CACHE["time"] = now
@@ -1071,10 +1079,16 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
 
 def _background_pool_refresher():
     """Continuously rebuild the image pool so the cache is always warm."""
+    refresh_count = 0
     while True:
         try:
             print("[BG] Refreshing image pool …", flush=True)
             t0 = time.time()
+            # Every 10 refreshes (~20 min), clear approved URLs to force fresh vetting.
+            if refresh_count % 10 == 0:
+                APPROVED_URLS.clear()
+                print("[BG] Cleared approved URLs for fresh vet", flush=True)
+            refresh_count += 1
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
             print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s", flush=True)
             _pre_vet_pool(images)
@@ -1477,21 +1491,6 @@ canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
   text-align: center;
   z-index: 100;
 }}
-#install-msg {{
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: #fff;
-  color: #000;
-  font: 16px/1.9 "Times New Roman", Times, serif;
-  align-items: flex-start;
-  justify-content: flex-start;
-  flex-direction: column;
-  z-index: 200;
-  padding: 2.5em 2em;
-  box-sizing: border-box;
-  overflow: hidden;
-}}
 @media (pointer: coarse) and (orientation: portrait) {{
   #rotate-msg {{ display: flex; }}
   canvas {{ display: none; }}
@@ -1499,7 +1498,6 @@ canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 </style>
 </head>
 <body>
-<div id="install-msg"></div>
 <div id="rotate-msg">turn your phone</div>
 <div id="debug-url"></div>
 <canvas id="view"></canvas>
@@ -1524,7 +1522,7 @@ function startSlideshow() {{
   }})();
 
   // Consistent rotation with preloading.
-  const SLIDE_INTERVAL = 5000;
+  const SLIDE_INTERVAL = 6000 + Math.random() * 1000;
   let _nextPreloaded = null;
   let _nextSrc = null;
 
@@ -1553,7 +1551,7 @@ function startSlideshow() {{
       loadRandomSlide();
     }}
     prepareNextSlide();
-    setTimeout(rotateSlides, SLIDE_INTERVAL);
+    setTimeout(rotateSlides, 6000 + Math.random() * 1000);
   }}
 
   (function waitForFirst() {{
@@ -1643,8 +1641,11 @@ function refillPool() {{
     fresh = candidates;
   }}
 
-  // Sort by source relevance then shuffle within each group.
-  const groups = [0, 1, 2].map(score => shuffleArray(fresh.filter(src => sourceScore(src) === score)));
+  // AP images first (newest stories), then shuffle Guardian/BBC within their groups.
+  const groups = [0, 1, 2].map(score => {{
+    const group = fresh.filter(src => sourceScore(src) === score);
+    return score === 0 ? group : shuffleArray(group); // keep AP in feed order
+  }});
   shuffledPool = groups.flat();
   poolIndex = 0;
 }}
@@ -1682,11 +1683,28 @@ function makeImage(sourceImage) {{
   const offCtx = off.getContext("2d", {{ willReadFrequently: true }}); syncContextQuality(offCtx);
   offCtx.fillStyle = "#000"; offCtx.fillRect(0,0,off.width,off.height);
   const fit = fitCover(sourceImage.width, sourceImage.height, off.width, off.height);
-  offCtx.drawImage(sourceImage, 0,0, sourceImage.width, sourceImage.height, fit.x, fit.y, fit.w, fit.h);
-  const imageData = offCtx.getImageData(0,0,off.width,off.height); const data = imageData.data;
+
+  // Process at half resolution then scale up — 4x fewer pixels, imperceptible quality loss.
+  const small = document.createElement("canvas");
+  small.width = Math.ceil(off.width / 2); small.height = Math.ceil(off.height / 2);
+  const smallCtx = small.getContext("2d", {{ willReadFrequently: true }});
+  smallCtx.drawImage(sourceImage, 0,0, sourceImage.width, sourceImage.height,
+    fit.x/2, fit.y/2, fit.w/2, fit.h/2);
+  const imageData = smallCtx.getImageData(0,0,small.width,small.height);
+  const data = imageData.data;
   const levels = 28; const step = 255/(levels-1);
-  for(let i=0;i<data.length;i+=4) {{ let gray = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; gray = Math.round(gray/step)*step; data[i]=gray; data[i+1]=gray; data[i+2]=gray; data[i+3]=255; }}
-  offCtx.putImageData(imageData,0,0); return off;
+  for(let i=0;i<data.length;i+=4) {{
+    let gray = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+    gray = Math.round(gray/step)*step;
+    data[i]=gray; data[i+1]=gray; data[i+2]=gray; data[i+3]=255;
+  }}
+  smallCtx.putImageData(imageData,0,0);
+
+  // Scale back up to full canvas.
+  offCtx.imageSmoothingEnabled = true;
+  offCtx.imageSmoothingQuality = "high";
+  offCtx.drawImage(small, 0,0, small.width,small.height, 0,0, off.width,off.height);
+  return off;
 }}
 function drawFallbackMessage() {{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height); }}
 function drawFlashlight() {{
@@ -1800,185 +1818,7 @@ window.addEventListener('orientationchange', () => {{
   }}, 100);
 }});
 
-// Install screen + slideshow startup — runs after all variables/functions defined.
-(function() {{
-  const isMobile = window.matchMedia('(pointer: coarse)').matches;
-  const isPWA = window.matchMedia('(display-mode: fullscreen)').matches
-             || window.navigator.standalone === true;
-
-  if (isMobile && !isPWA) {{
-    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    const isAndroid = /android/i.test(navigator.userAgent);
-    const isSafari = /safari/i.test(navigator.userAgent) && !/chrome|crios|fxios/i.test(navigator.userAgent);
-    const isChrome = /chrome|crios/i.test(navigator.userAgent);
-    const isFirefox = /fxios|firefox/i.test(navigator.userAgent);
-
-    const iosSafariInstructions = [
-      "misshurry",
-      "",
-      "This is a web app about news images.",
-      "To install it on your iPhone:",
-      "",
-      "1. Tap the Share button at the",
-      "   bottom of your screen \u2014",
-      "   it looks like a box with an",
-      "   arrow pointing upward.",
-      "",
-      "2. Scroll down in the menu",
-      "   that appears.",
-      "",
-      "3. Tap \u201cAdd to Home Screen\u201d.",
-      "",
-      "4. Tap \u201cAdd\u201d in the top right corner.",
-      "",
-      "5. Open misshurry from your",
-      "   home screen.",
-      "",
-      "6. Turn your phone horizontal.",
-    ];
-
-    const iosChromeInstructions = [
-      "misshurry",
-      "",
-      "This is a web app about news images.",
-      "To install it on your iPhone:",
-      "",
-      "1. Chrome doesn\u2019t support",
-      "   installing web apps on iPhone.",
-      "",
-      "2. Open this page in Safari instead.",
-      "   Copy this address and paste it",
-      "   into Safari.",
-      "",
-      "3. Then follow the instructions",
-      "   in Safari to add it to your",
-      "   home screen.",
-    ];
-
-    const iosOtherInstructions = [
-      "misshurry",
-      "",
-      "This is a web app about news images.",
-      "To install it on your iPhone:",
-      "",
-      "1. Open this page in Safari.",
-      "",
-      "2. Tap the Share button at the",
-      "   bottom of your screen \u2014",
-      "   it looks like a box with an",
-      "   arrow pointing upward.",
-      "",
-      "3. Tap \u201cAdd to Home Screen\u201d.",
-      "",
-      "4. Tap \u201cAdd\u201d.",
-      "",
-      "5. Open misshurry from your",
-      "   home screen.",
-      "",
-      "6. Turn your phone horizontal.",
-    ];
-
-    const androidChromeInstructions = [
-      "misshurry",
-      "",
-      "This is a web app about news images.",
-      "To install it on your phone:",
-      "",
-      "1. Tap the three dots \u22ee in the",
-      "   top right corner of Chrome.",
-      "",
-      "2. Tap \u201cAdd to Home screen\u201d.",
-      "",
-      "3. Tap \u201cAdd\u201d to confirm.",
-      "",
-      "4. Open misshurry from your",
-      "   home screen.",
-      "",
-      "5. Turn your phone horizontal.",
-    ];
-
-    const androidFirefoxInstructions = [
-      "misshurry",
-      "",
-      "This is a web app about news images.",
-      "To install it on your phone:",
-      "",
-      "1. Tap the three dots \u22ee at the",
-      "   bottom of Firefox.",
-      "",
-      "2. Tap \u201cInstall\u201d.",
-      "",
-      "3. Tap \u201cAdd to Home screen\u201d.",
-      "",
-      "4. Open misshurry from your",
-      "   home screen.",
-      "",
-      "5. Turn your phone horizontal.",
-    ];
-
-    const androidOtherInstructions = [
-      "misshurry",
-      "",
-      "This is a web app about news images.",
-      "To install it on your phone:",
-      "",
-      "1. Open this page in Chrome.",
-      "",
-      "2. Tap the three dots \u22ee in the",
-      "   top right corner.",
-      "",
-      "3. Tap \u201cAdd to Home screen\u201d.",
-      "",
-      "4. Tap \u201cAdd\u201d.",
-      "",
-      "5. Open misshurry from your",
-      "   home screen.",
-      "",
-      "6. Turn your phone horizontal.",
-    ];
-
-    let lines = null;
-    if (isIOS) {{
-      lines = isSafari ? iosSafariInstructions
-            : isChrome ? iosChromeInstructions
-            : iosOtherInstructions;
-    }} else if (isAndroid) {{
-      lines = isChrome ? androidChromeInstructions
-            : isFirefox ? androidFirefoxInstructions
-            : androidOtherInstructions;
-    }}
-    if (!lines) {{ startSlideshow(); return; }}
-
-    const el = document.getElementById('install-msg');
-    el.style.display = 'flex';
-
-    const p = document.createElement('p');
-    p.style.cssText = 'margin:0; white-space:pre-wrap; max-width:340px;';
-    el.appendChild(p);
-
-    const fullText = lines.join('\\n');
-    let i = 0;
-
-    function typeNext() {{
-      if (i >= fullText.length) {{
-        el.addEventListener('click', () => {{ el.style.display = 'none'; startSlideshow(); }});
-        return;
-      }}
-      const ch = fullText[i++];
-      p.textContent += ch;
-      let delay = 65;
-      if (ch === '\\n') delay = 320;
-      else if (ch === '.' || ch === ',') delay = 280;
-      else if (ch === ' ') delay = 80;
-      else if (Math.random() < 0.1) delay = 140;
-      setTimeout(typeNext, delay);
-    }}
-
-    typeNext();
-  }} else {{
-    startSlideshow();
-  }}
-}})();
+startSlideshow();
 </script>
 </body>
 </html>'''
