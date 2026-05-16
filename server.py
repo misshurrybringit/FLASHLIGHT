@@ -1119,28 +1119,6 @@ def _pre_cache_seed(images):
         except Exception:
             pass
     print(f"[BG] Seed pre-cached.", flush=True)
-    """Continuously rebuild the image pool so the cache is always warm."""
-    refresh_count = 0
-    while True:
-        try:
-            print("[BG] Refreshing image pool …", flush=True)
-            t0 = time.time()
-            # Every 10 refreshes (~20 min), clear approved URLs to force fresh vetting.
-            if refresh_count % 10 == 0:
-                APPROVED_URLS.clear()
-                print("[BG] Cleared approved URLs for fresh vet", flush=True)
-            refresh_count += 1
-            images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s", flush=True)
-            _pre_cache_seed(images)
-            _pre_vet_pool(images)
-        except Exception as e:
-            import traceback
-            print("[BG] Refresh error:", e, flush=True)
-            traceback.print_exc()
-        # First 3 cycles: refresh every 20s to build pool fast, then every 60s.
-        sleep_time = 20 if refresh_count <= 3 else BACKGROUND_REFRESH_SECONDS
-        time.sleep(sleep_time)
 
 
 def _pre_vet_one(url):
@@ -1533,37 +1511,15 @@ def render_html():
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
-#debug-url {{ display: none; }}
-#rotate-msg {{
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: #000;
-  color: rgba(255,255,255,0.5);
-  font: 14px/1.6 monospace;
-  letter-spacing: 0.08em;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  z-index: 100;
-}}
-@media (pointer: coarse) and (orientation: portrait) {{
-  #rotate-msg {{ display: flex; }}
-  canvas {{ display: none; }}
-}}
+#debug-url {{ position:fixed; bottom:8px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,.42); font:10px/1.4 monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90vw; z-index:50; cursor:copy; user-select:none; pointer-events:auto; background:rgba(0,0,0,.22); padding:2px 5px; border-radius:3px; }}
 </style>
 </head>
 <body>
-<div id="rotate-msg">turn your phone</div>
 <div id="debug-url"></div>
 <canvas id="view"></canvas>
 <script>
 if ('serviceWorker' in navigator) {{
   navigator.serviceWorker.register('/sw.js').catch(() => {{}});
-}}
-// Try to lock to landscape on mobile when running as PWA.
-if (screen.orientation && screen.orientation.lock) {{
-  screen.orientation.lock('landscape').catch(() => {{}});
 }}
 
 // Show install instructions if on mobile browser (not PWA).
@@ -1766,7 +1722,8 @@ function drawFallbackMessage() {{ ctx.clearRect(0,0,canvas.width,canvas.height);
 function drawFlashlight() {{
   if (!currentPrepared) {{ drawFallbackMessage(); return; }}
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
-  const radius = Math.sqrt(canvas.width*canvas.width + canvas.height*canvas.height) * (isTouchDevice ? 0.09 : 0.075);
+  const minDim = Math.min(canvas.width, canvas.height);
+  const radius = minDim * (isTouchDevice ? 0.18 : 0.12);
   ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
   cutout.addColorStop(0.00,"rgba(255,248,190,1.00)"); cutout.addColorStop(0.20,"rgba(255,238,150,0.84)"); cutout.addColorStop(0.50,"rgba(255,220,95,0.46)"); cutout.addColorStop(0.82,"rgba(255,200,55,0.18)"); cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
@@ -1861,19 +1818,6 @@ const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
 
-// Failsafe — always start slideshow on desktop regardless of install screen logic.
-if (!window.matchMedia('(pointer: coarse)').matches) {{ startSlideshow(); }}
-
-// On mobile, start slideshow when rotated to landscape.
-window.addEventListener('orientationchange', () => {{
-  setTimeout(() => {{
-    if (window.innerWidth > window.innerHeight) {{
-      startSlideshow();
-      if (currentImage) {{ resizeCanvas(); currentPrepared = makeImage(currentImage); drawFlashlight(); }}
-    }}
-  }}, 100);
-}});
-
 startSlideshow();
 </script>
 </body>
@@ -1938,7 +1882,7 @@ class Handler(BaseHTTPRequestHandler):
                 "description": "news images through a flashlight",
                 "start_url": "/",
                 "display": "fullscreen",
-                "orientation": "landscape",
+                "orientation": "any",
                 "background_color": "#000000",
                 "theme_color": "#000000",
                 "icons": [
