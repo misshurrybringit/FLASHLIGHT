@@ -207,6 +207,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "e46b9940",
     "409aac70",
     "62f61850",
+    "b4133310",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -430,6 +431,8 @@ def extract_rss_item_image(item):
     if thumb is not None:
         url = thumb.attrib.get("url")
         if url:
+            # Upgrade Guardian thumbnail to full size.
+            url = re.sub(r'width=\d+', 'width=1200', url)
             return clean_extracted_image_url(url)
 
     for media_content in item.findall("media:content", media_ns):
@@ -437,6 +440,7 @@ def extract_rss_item_image(item):
         mime = media_content.attrib.get("type", "")
         medium = media_content.attrib.get("medium", "")
         if url and (mime.startswith("image/") or medium == "image"):
+            url = re.sub(r'width=\d+', 'width=1200', url)
             return clean_extracted_image_url(url)
 
     enclosure = item.find("enclosure")
@@ -455,6 +459,19 @@ def extract_rss_item_image(item):
                 cleaned = clean_extracted_image_url(m.group(1))
                 if cleaned:
                     return cleaned
+
+    # Last resort: search raw XML of the item for any image URL.
+    try:
+        import xml.etree.ElementTree as _ET
+        raw = _ET.tostring(item, encoding="unicode")
+        for m in re.finditer(r'https://[^\s\'"<>&]+\.(?:jpg|jpeg|webp)', raw, re.IGNORECASE):
+            url = m.group(0).rstrip('.,;)')
+            url = re.sub(r'width=\d+', 'width=1200', url)
+            cleaned = clean_extracted_image_url(url)
+            if cleaned:
+                return cleaned
+    except Exception:
+        pass
 
     return None
 
@@ -557,11 +574,9 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             return False
         if "interactive.guim.co.uk" in lower:
             return False
-        # i.guim.co.uk: block staff photos and tiny thumbnails.
+        # i.guim.co.uk: only block staff photos and avatars.
         if "i.guim.co.uk" in lower:
             if "/img/uploads/" in lower or "/img/static/" in lower:
-                return False
-            if "width=80" in lower or "width=100" in lower:
                 return False
         # Guardian composite/collage images — always divided layouts.
         if "guim.co.uk" in lower and "_0_5000_4000" in lower:
@@ -952,11 +967,12 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         try:
             rss = fetch_text(feed_url, timeout=4.0)
             if not rss or len(rss) < 100:
-                print(f"[RSS] {feed_url} — empty response ({len(rss) if rss else 0} bytes)", flush=True)
+                print(f"[RSS] {feed_url} — empty response", flush=True)
                 return found
             root = ET.fromstring(rss)
             items = root.findall(".//item")
             is_bbc = is_bbc_feed_url(feed_url)
+            is_guardian_feed = "theguardian.com" in feed_url
             item_limit = 750 if is_bbc else 90
             found_imgs = 0
             for item in items[:item_limit]:
@@ -966,11 +982,14 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                     if cleaned and not url_is_known_bad(cleaned):
                         found.append((cleaned, is_bbc))
                         found_imgs += 1
+                    elif is_guardian_feed and not cleaned:
+                        print(f"[RSS] Guardian image rejected by clean: {img[:80]}", flush=True)
                 elif not is_bbc:
                     link = item.find("link")
                     if link is not None and link.text:
                         found.append((link.text.strip(), "article_link"))
-            print(f"[RSS] {feed_url.split('/')[-1]} — {len(items)} items, {found_imgs} images", flush=True)
+            name = feed_url.split("/")[-2] if feed_url.endswith("rss") else feed_url.split("/")[-1]
+            print(f"[RSS] {name} — {len(items)} items, {found_imgs} images", flush=True)
         except Exception as e:
             print(f"[RSS] {feed_url} error: {e}", flush=True)
         return found
