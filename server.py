@@ -196,6 +196,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "ef90228cd91038b433059da0b2a8481036ee2986",
     "a66a935e60878e7844fa2d1051c9f0144b334d9c",
     "a983c310",
+    "73d3ef6a2b06188911f5c7e1a5c6480e935e942d",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1392,11 +1393,11 @@ def image_is_portrait_or_generic_isolated_subject(data):
     border_unique = len(np.unique(quant[smask].reshape(-1, 3), axis=0))
 
     plain_background = (
-        (border_edge < 0.040 and border_std < 50 and border_unique < 110)
-        or (border_edge < 0.030 and border_sat_std < 38 and border_unique < 95)
-        or (border_edge < 0.025 and border_sat_mean < 65 and border_val_mean > 85)
+        (border_edge < 0.055 and border_std < 60 and border_unique < 130)
+        or (border_edge < 0.040 and border_sat_std < 45 and border_unique < 110)
+        or (border_edge < 0.030 and border_sat_mean < 75 and border_val_mean > 80)
     )
-    isolated_subject = center_edge > max(0.045, border_edge * 1.9)
+    isolated_subject = center_edge > max(0.040, border_edge * 1.7)
 
     if plain_background and isolated_subject:
         return True
@@ -1411,7 +1412,7 @@ def image_is_portrait_or_generic_isolated_subject(data):
         val_c = crop_hsv[:, :, 2]
         skinish = ((hue < 24) | (hue > 165)) & (sat_c > 35) & (sat_c < 185) & (val_c > 55)
         skinish_frac = float(np.mean(skinish))
-        if skinish_frac > 0.070 and border_edge < 0.045 and border_unique < 140:
+        if skinish_frac > 0.055 and border_edge < 0.055 and border_unique < 160:
             return True
 
     return False
