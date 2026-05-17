@@ -1167,11 +1167,13 @@ def _pre_vet_one(url):
 def _pre_vet_pool(images):
     """Pre-vet all images in the pool in the background using a thread pool."""
     REJECT_CACHE.clear()
-    # Auto-approve AP dims URLs immediately so they're available before full vet completes.
+    # Auto-approve AP dims URLs immediately — but only if they can be pre-cached.
+    # If pre-cache fails (403/400), they'll stay out of APPROVED_URLS.
     for url in images:
         if "dims.apnews.com" in url and not url_is_known_bad(url):
-            APPROVED_URLS.add(url)
-    print(f"[BG] Auto-approved {len(APPROVED_URLS)} AP dims URLs", flush=True)
+            if url in PROXY_CACHE:  # only approve if already cached
+                APPROVED_URLS.add(url)
+    print(f"[BG] Auto-approved {len(APPROVED_URLS)} pre-cached AP dims URLs", flush=True)
     # Only vet non-AP URLs (BBC, Guardian) through cv2.
     to_vet = [u for u in images if u not in APPROVED_URLS]
     print(f"[BG] Pre-vetting {len(to_vet)} non-AP images …", flush=True)
@@ -1863,7 +1865,10 @@ class Handler(BaseHTTPRequestHandler):
             # If APPROVED_URLS is empty (first boot), return everything so client isn't blank.
             if APPROVED_URLS:
                 cached = [img for img in cached
-                         if "dims.apnews.com" in img or img in APPROVED_URLS]
+                         if "dims.apnews.com" not in img
+                         and (img in APPROVED_URLS
+                              or (img not in REJECT_CACHE
+                                  and not url_is_known_bad(img)))]
             sequence = []
             for img in cached:
                 proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
