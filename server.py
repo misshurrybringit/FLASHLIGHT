@@ -1124,16 +1124,18 @@ def _pre_vet_one(url):
     """Fetch and check one image; add to APPROVED_URLS if it passes."""
     if url in APPROVED_URLS:
         return
-    # AP dims and BBC URLs — auto-approve, rely on URL blocklist for filtering.
-    if "dims.apnews.com" in url or "bbci.co.uk" in url or "bbc.co.uk" in url:
-        APPROVED_URLS.add(url)
+    # AP dims — only approve if pre-cached.
+    if "dims.apnews.com" in url:
+        if url in PROXY_CACHE:
+            APPROVED_URLS.add(url)
         return
-    # Non-Guardian sources — approve without cv2.
+    # Non-Guardian, non-BBC sources — approve without cv2.
     is_guardian = "guim.co.uk" in url or "theguardian.com" in url
-    if not is_guardian:
+    is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
+    if not is_guardian and not is_bbc:
         APPROVED_URLS.add(url)
         return
-    # Guardian — run cv2 checks to filter portraits/graphics/dividers.
+    # Guardian and BBC — run cv2 checks.
     try:
         data, content_type = fetch_bytes(url, timeout=8)
         if not content_type.startswith("image/"):
@@ -1383,17 +1385,16 @@ def image_is_portrait_or_generic_isolated_subject(data):
     border_unique = len(np.unique(quant[smask].reshape(-1, 3), axis=0))
 
     plain_background = (
-        (border_edge < 0.030 and border_std < 42 and border_unique < 95)
-        or (border_edge < 0.022 and border_sat_std < 30 and border_unique < 80)
-        or (border_edge < 0.020 and border_sat_mean < 55 and border_val_mean > 92)
+        (border_edge < 0.040 and border_std < 50 and border_unique < 110)
+        or (border_edge < 0.030 and border_sat_std < 38 and border_unique < 95)
+        or (border_edge < 0.025 and border_sat_mean < 65 and border_val_mean > 85)
     )
-    isolated_subject = center_edge > max(0.052, border_edge * 2.15)
+    isolated_subject = center_edge > max(0.045, border_edge * 1.9)
 
     if plain_background and isolated_subject:
         return True
 
     # 3) Reject obvious single-person waist-up crops even if the face detector misses.
-    # Skin-ish blob centered + low-detail border is usually a generic portrait.
     y0, y1 = int(h * 0.08), int(h * 0.78)
     x0, x1 = int(w * 0.20), int(w * 0.80)
     crop_hsv = hsv[y0:y1, x0:x1, :]
@@ -1403,7 +1404,7 @@ def image_is_portrait_or_generic_isolated_subject(data):
         val_c = crop_hsv[:, :, 2]
         skinish = ((hue < 24) | (hue > 165)) & (sat_c > 35) & (sat_c < 185) & (val_c > 55)
         skinish_frac = float(np.mean(skinish))
-        if skinish_frac > 0.085 and border_edge < 0.038 and border_unique < 125:
+        if skinish_frac > 0.070 and border_edge < 0.045 and border_unique < 140:
             return True
 
     return False
