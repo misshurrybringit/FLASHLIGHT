@@ -77,7 +77,7 @@ REJECT_CACHE_SECONDS = 1800
 APPROVED_URLS = set()
 
 GUARDIAN_API_ENABLED = True
-GUARDIAN_API_KEY = "66bece60-5ad3-4d04-9f77-d27e8a4122c2"
+GUARDIAN_API_KEY = "55e2b57b-70cb-4542-a4b4-83971a720752"
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics", "environment",
     "global-development", "immigration",
@@ -137,7 +137,7 @@ def fetch_guardian_api_images(limit=200):
     return images
 
 GUARDIAN_API_CACHE = {"images": [], "time": 0}
-GUARDIAN_API_CACHE_SECONDS = 21600  # 6 hours
+GUARDIAN_API_CACHE_SECONDS = 3600  # 1 hour
 
 
 def get_guardian_api_images():
@@ -145,8 +145,11 @@ def get_guardian_api_images():
         return []
     now = time.time()
     if GUARDIAN_API_CACHE["images"] and now - GUARDIAN_API_CACHE["time"] < GUARDIAN_API_CACHE_SECONDS:
+        print(f"[Guardian API] Using cache: {len(GUARDIAN_API_CACHE['images'])} images", flush=True)
         return GUARDIAN_API_CACHE["images"][:]
+    print("[Guardian API] Fetching fresh images …", flush=True)
     images = fetch_guardian_api_images(limit=400)
+    print(f"[Guardian API] Got {len(images)} images", flush=True)
     if images:
         GUARDIAN_API_CACHE["images"] = images
         GUARDIAN_API_CACHE["time"] = now
