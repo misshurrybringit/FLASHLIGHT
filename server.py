@@ -83,8 +83,8 @@ HEADERS = {
 MAX_IMAGE_POOL = 900
 SEQUENCE_LENGTH = 800
 IMAGE_CACHE = {"time": 0, "images": [], "lock": threading.Lock()}
-CACHE_SECONDS = 60
-BACKGROUND_REFRESH_SECONDS = 60  # pre-warm interval
+CACHE_SECONDS = 120
+BACKGROUND_REFRESH_SECONDS = 120  # pre-warm interval
 
 PROXY_CACHE = {}
 PROXY_CACHE_SECONDS = 600
@@ -96,7 +96,7 @@ REJECT_CACHE_SECONDS = 1800
 # URLs that passed cv2 checks during pool build — skip checks at serve time.
 APPROVED_URLS = set()
 
-GUARDIAN_API_KEY = "66bece60-5ad3-4d04-9f77-d27e8a4122c2"
+GUARDIAN_API_ENABLED = False  # disabled until rate limit ban lifts
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics", "environment",
     "global-development", "immigration",
@@ -148,11 +148,28 @@ def fetch_guardian_api_images(limit=200):
                         return images
         except Exception as e:
             print(f"[Guardian API] {section} error: {e}", flush=True)
-        time.sleep(0.5)  # avoid rate limiting
+            if "429" in str(e):
+                print("[Guardian API] Rate limited — stopping for this cycle", flush=True)
+                break
+        time.sleep(1.5)  # avoid rate limiting
     print(f"[Guardian API] fetched {len(images)} images", flush=True)
     return images
 
-MIN_IMAGE_WIDTH = 760
+GUARDIAN_API_CACHE = {"images": [], "time": 0}
+GUARDIAN_API_CACHE_SECONDS = 21600  # 6 hours
+
+
+def get_guardian_api_images():
+    if not GUARDIAN_API_ENABLED:
+        return []
+    now = time.time()
+    if GUARDIAN_API_CACHE["images"] and now - GUARDIAN_API_CACHE["time"] < GUARDIAN_API_CACHE_SECONDS:
+        return GUARDIAN_API_CACHE["images"][:]
+    images = fetch_guardian_api_images(limit=400)
+    if images:
+        GUARDIAN_API_CACHE["images"] = images
+        GUARDIAN_API_CACHE["time"] = now
+    return images
 MIN_IMAGE_HEIGHT = 430
 
 KNOWN_BAD_URL_FRAGMENTS = [
@@ -291,7 +308,9 @@ def canonical_image_key(url):
 
 
 def fetch_text(url, timeout=3):
-    req = urllib.request.Request(url, headers=HEADERS)
+    headers = dict(HEADERS)
+    headers["Accept-Encoding"] = "identity"  # disable compression for text fetches
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as response:
         return response.read().decode("utf-8", errors="ignore")
 
@@ -865,20 +884,31 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     page_article_scrape_budget = 50
     max_bbc_images = int(limit * 0.06)
 
+    _add_image_stats = {"total": 0, "clean_fail": 0, "bad": 0, "dup": 0, "reject_cache": 0, "added": 0}
+
     def add_image(img):
+        _add_image_stats["total"] += 1
         if not img:
+            _add_image_stats["clean_fail"] += 1
             return False
         img = clean_extracted_image_url(img)
-        if not img or url_is_known_bad(img):
+        if not img:
+            _add_image_stats["clean_fail"] += 1
+            return False
+        if url_is_known_bad(img):
+            _add_image_stats["bad"] += 1
             return False
         key = canonical_image_key(img)
         if not key or key in seen:
+            _add_image_stats["dup"] += 1
             return False
         rejected = REJECT_CACHE.get(img)
         if rejected and now - rejected["time"] < REJECT_CACHE_SECONDS:
+            _add_image_stats["reject_cache"] += 1
             return False
         seen.add(key)
         images.append(img)
+        _add_image_stats["added"] += 1
         return True
 
     # Direct public pages first. This is the most reliable way to get AP scene images.
@@ -888,38 +918,35 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         add_image(img)
 
     # Fetch Guardian API and RSS feeds in parallel.
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        guardian_future = ex.submit(fetch_guardian_api_images, 600)
-        wikimedia_future = ex.submit(fetch_wikimedia_news_images, 60)
-        for fut in as_completed([guardian_future, wikimedia_future]):
-            try:
-                for img in fut.result():
-                    add_image(img)
-            except Exception:
-                pass
-
-    print(f"[BG] After Guardian + Wikimedia APIs: {len(images)} images", flush=True)
+    # Guardian API — disabled via flag until rate limit ban lifts.
+    for img in get_guardian_api_images():
+        add_image(img)
 
     def fetch_one_feed(feed_url):
         """Fetch one RSS feed and return list of image URLs found."""
         found = []
         try:
             rss = fetch_text(feed_url, timeout=4.0)
+            if not rss or len(rss) < 100:
+                print(f"[RSS] {feed_url} — empty response ({len(rss) if rss else 0} bytes)", flush=True)
+                return found
             root = ET.fromstring(rss)
             items = root.findall(".//item")
-            random.shuffle(items)
             is_bbc = is_bbc_feed_url(feed_url)
             item_limit = 750 if is_bbc else 90
+            found_imgs = 0
             for item in items[:item_limit]:
                 img = extract_rss_item_image(item)
                 if img:
                     cleaned = clean_extracted_image_url(img)
                     if cleaned and not url_is_known_bad(cleaned):
                         found.append((cleaned, is_bbc))
+                        found_imgs += 1
                 elif not is_bbc:
                     link = item.find("link")
                     if link is not None and link.text:
                         found.append((link.text.strip(), "article_link"))
+            print(f"[RSS] {feed_url.split('/')[-1]} — {len(items)} items, {found_imgs} images", flush=True)
         except Exception as e:
             print(f"[RSS] {feed_url} error: {e}", flush=True)
         return found
@@ -951,6 +978,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                         bbc_added += 1
 
     print(f"[BG] After RSS feeds: {len(images)} images", flush=True)
+    print(f"[BG] add_image stats: {_add_image_stats}", flush=True)
 
     # Scrape article pages from RSS that had no inline image, in parallel.
     random.shuffle(article_links_to_scrape)
