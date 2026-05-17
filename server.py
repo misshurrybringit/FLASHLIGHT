@@ -76,14 +76,9 @@ DIRECT_IMAGE_PAGES = []
 
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Sec-Fetch-Dest": "image",
-    "Sec-Fetch-Mode": "no-cors",
-    "Sec-Fetch-Site": "cross-site",
 }
 
 MAX_IMAGE_POOL = 900
@@ -241,10 +236,10 @@ def upgrade_bbc_image_url(url):
     url = url.replace("/660/", "/1024/")
     url = re.sub(r"/ic/\d+x\d+/", "/ic/1024x576/", url)
     url = re.sub(r"/standard/\d+/", "/standard/1024/", url)
-    # Upgrade AP dims resize to a larger width while keeping aspect ratio.
+    # Upgrade AP dims resize to a reasonable width — don't go too large or CDN blocks.
     if "dims.apnews.com" in url:
-        url = re.sub(r'resize/\d+x\d+!', 'resize/2880x1920!', url)
-        url = re.sub(r'resize/\d+x\d+/', 'resize/2880x1920/', url)
+        url = re.sub(r'resize/\d+x\d+!', 'resize/980x653!', url)
+        url = re.sub(r'resize/\d+x\d+/', 'resize/980x653/', url)
     return url
 
 
@@ -842,12 +837,12 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         random.shuffle(bucket)
 
     mixed = (
-        buckets["ap"][:700]
-        + buckets["reuters"][:300]
-        + buckets["guardian"][:300]
-        + buckets["other"][:200]
-        + buckets["spiegel"][:100]
-        + buckets["bbc"][:60]
+        buckets["guardian"][:400]
+        + buckets["ap"][:300]
+        + buckets["reuters"][:100]
+        + buckets["other"][:100]
+        + buckets["bbc"][:120]
+        + buckets["spiegel"][:80]
     )
 
     bbc_in_mixed = sum(1 for i in mixed if source_category(i) == "bbc")
@@ -888,7 +883,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     non_bbc_article_scrape_budget = 60
     bbc_added = 0
     page_article_scrape_budget = 50
-    max_bbc_images = int(limit * 0.06)
+    max_bbc_images = int(limit * 0.15)
 
     _add_image_stats = {"total": 0, "clean_fail": 0, "bad": 0, "dup": 0, "reject_cache": 0, "added": 0}
 
@@ -1599,11 +1594,11 @@ function slideAllowedForCurrentOrientation(slide) {{ return !(slide.verticalOnly
 const badSrcs = new Set();
 const _shownThisCycle = new Set();
 function sourceScore(src) {{
-  if (src.includes('dims.apnews.com')) return 0;
-  if (src.includes('guim.co.uk')) return 1;
-  if (src.includes('spiegel.de')) return 2;
-  if (src.includes('bbci.co.uk')) return 3;
-  return 1;
+  if (src.includes('guim.co.uk')) return 0;
+  if (src.includes('dims.apnews.com')) return 1;
+  if (src.includes('bbci.co.uk')) return 2;
+  if (src.includes('spiegel.de')) return 3;
+  return 2;
 }}
 function refillPool() {{
   let candidates = slides
