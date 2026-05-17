@@ -35,9 +35,6 @@ RSS_FEEDS = [
     # BBC: backup only, capped low.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
-
-    # Der Spiegel — backup.
-    "https://www.spiegel.de/international/index.rss",
 ]
 
 SOURCE_PAGES = [
@@ -96,7 +93,7 @@ REJECT_CACHE_SECONDS = 1800
 # URLs that passed cv2 checks during pool build — skip checks at serve time.
 APPROVED_URLS = set()
 
-GUARDIAN_API_ENABLED = False  # disabled until rate limit ban lifts
+GUARDIAN_API_ENABLED = True
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics", "environment",
     "global-development", "immigration",
@@ -1070,16 +1067,19 @@ def _pre_cache_seed(images):
             if "dims.apnews.com" in img
             and not url_is_known_bad(img)][:20]
     print(f"[BG] Pre-caching {len(seed)} seed images …", flush=True)
+    cached_count = 0
     for url in seed:
         if url in PROXY_CACHE:
+            cached_count += 1
             continue
         try:
             data, content_type = fetch_bytes(url, timeout=8)
             if content_type.startswith("image/") and len(data) > 10000:
                 PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
-        except Exception:
-            pass
-    print(f"[BG] Seed pre-cached.", flush=True)
+                cached_count += 1
+        except Exception as e:
+            print(f"[SEED] fetch failed: {e}", flush=True)
+    print(f"[BG] Seed pre-cached: {cached_count}/{len(seed)} succeeded.", flush=True)
 
 
 def _pre_vet_one(url):
