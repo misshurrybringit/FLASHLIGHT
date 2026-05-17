@@ -189,6 +189,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "b4133310",
     "25317530",
     "5d62c560",
+    "ef90228cd91038b433059da0b2a8481036ee2986",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1325,17 +1326,16 @@ def image_is_portrait_or_generic_isolated_subject(data):
             cx = (x + fw / 2) / float(w)
             cy = (y + fh / 2) / float(h)
             centered = 0.20 < cx < 0.80 and 0.08 < cy < 0.65
-            # Reject only if face takes up >4% of frame (posed portrait/PR shot)
-            if centered and face_area > 0.04:
+            # Reject if face takes up >2% of frame (lowered from 4%)
+            if centered and face_area > 0.02:
                 return True
         elif len(faces) == 2:
             total_area = sum((fw * fh) for (x, y, fw, fh) in faces) / float(w * h)
-            # Two large faces = interview/handshake PR shot
-            if total_area > 0.06:
+            if total_area > 0.04:
                 return True
         elif len(faces) >= 3:
             total_area = sum((fw * fh) for (x, y, fw, fh) in faces) / float(w * h)
-            if total_area > 0.12:
+            if total_area > 0.08:
                 return True
 
     # 2) Generic background / isolated subject rejection.
