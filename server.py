@@ -17,6 +17,9 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
+    # Al Jazeera — article links scraped for og:image URLs.
+    "https://www.aljazeera.com/xml/rss/all.xml",
+
     # BBC: backup only, capped low.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
@@ -557,6 +560,8 @@ def extract_image_urls_from_html(html, base_url, limit=80):
         # Guardian author avatars and small images.
         if "yimg.com" in lower and (";w=80;" in lower or ";h=60;" in lower or "logo" in lower):
             return False
+        if "static.theguardian.com" in lower:
+            return False
         if "interactive.guim.co.uk" in lower:
             return False
         # i.guim.co.uk: only block staff photos and avatars.
@@ -845,6 +850,8 @@ def source_category(url):
         return "npr"
     if "spiegel.de" in lower:
         return "spiegel"
+    if "aljazeera" in lower:
+        return "other"
     if "bbci.co.uk" in lower or "bbc.co.uk" in lower:
         return "bbc"
     return "other"
