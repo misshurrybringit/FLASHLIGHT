@@ -17,16 +17,6 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
-    # Guardian RSS — working well, good photojournalism.
-    "https://www.theguardian.com/world/rss",
-    "https://www.theguardian.com/us-news/rss",
-    "https://www.theguardian.com/world/middleeast/rss",
-    "https://www.theguardian.com/world/europe-news/rss",
-    "https://www.theguardian.com/world/asia/rss",
-    "https://www.theguardian.com/world/africa/rss",
-    "https://www.theguardian.com/uk-news/rss",
-    "https://www.theguardian.com/environment/rss",
-
     # BBC: backup only, capped low.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
