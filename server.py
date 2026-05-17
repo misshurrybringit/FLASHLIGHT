@@ -1,3 +1,4 @@
+
 import json
 import os
 import random
@@ -193,6 +194,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "25317530",
     "5d62c560",
     "ef90228cd91038b433059da0b2a8481036ee2986",
+    "a66a935e60878e7844fa2d1051c9f0144b334d9c",
+    "a983c310",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -569,7 +572,7 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             if "/img/uploads/" in lower or "/img/static/" in lower:
                 return False
         # Guardian composite/collage images — always divided layouts.
-        if "guim.co.uk" in lower and "_0_5000_4000" in lower:
+        if "guim.co.uk" in lower and "_5000_4000" in lower:
             return False
         # NPR brightspotcdn URLs with non-news filenames (games, puzzles, podcasts etc).
         if "brightspotcdn" in lower and any(bad in lower for bad in [
@@ -1320,14 +1323,18 @@ def image_is_portrait_or_generic_isolated_subject(data):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
+    # 0) Square-ish crops with high skin content are almost always portraits.
+    if 0.7 < (h / float(w)) < 1.4:
+        pass  # continue to other checks
+    
     # 1) Face/headshot rejection. Only reject when a face clearly dominates the frame.
     cascade = get_cv2_face_cascade()
     if cascade is not None:
         faces = cascade.detectMultiScale(
             gray,
             scaleFactor=1.08,
-            minNeighbors=5,
-            minSize=(max(50, int(w * 0.08)), max(50, int(h * 0.10))),
+            minNeighbors=4,
+            minSize=(max(30, int(w * 0.05)), max(30, int(h * 0.06))),
         )
         if len(faces) == 1:
             x, y, fw, fh = faces[0]
