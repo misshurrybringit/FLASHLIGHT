@@ -32,11 +32,15 @@ RSS_FEEDS = [
     # Al Jazeera — was working before.
     "https://www.aljazeera.com/xml/rss/all.xml",
 
-    # Guardian RSS — backup while API is rate limited.
+    # Guardian RSS — good photojournalism, different from API.
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
     "https://www.theguardian.com/world/middleeast/rss",
     "https://www.theguardian.com/world/europe-news/rss",
+    "https://www.theguardian.com/world/asia/rss",
+    "https://www.theguardian.com/world/africa/rss",
+    "https://www.theguardian.com/uk-news/rss",
+    "https://www.theguardian.com/environment/rss",
 
     # BBC: backup only, capped low.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
@@ -420,26 +424,38 @@ def extract_inline_images_from_html(html, base_url, max_images=35):
 
 def extract_rss_item_image(item):
     media_ns = {"media": "http://search.yahoo.com/mrss/"}
+    content_ns = {"content": "http://purl.org/rss/1.0/modules/content/"}
+
     thumb = item.find("media:thumbnail", media_ns)
     if thumb is not None:
-        return clean_extracted_image_url(thumb.attrib.get("url"))
+        url = thumb.attrib.get("url")
+        if url:
+            return clean_extracted_image_url(url)
+
     for media_content in item.findall("media:content", media_ns):
         url = media_content.attrib.get("url")
         mime = media_content.attrib.get("type", "")
         medium = media_content.attrib.get("medium", "")
         if url and (mime.startswith("image/") or medium == "image"):
             return clean_extracted_image_url(url)
+
     enclosure = item.find("enclosure")
     if enclosure is not None:
         url = enclosure.attrib.get("url", "")
         mime = enclosure.attrib.get("type", "")
         if url and mime.startswith("image/"):
             return clean_extracted_image_url(url)
-    description = item.find("description")
-    if description is not None and description.text:
-        m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', description.text, re.IGNORECASE)
-        if m:
-            return clean_extracted_image_url(m.group(1))
+
+    # Guardian uses content:encoded with embedded img tags.
+    for tag in ["content:encoded", "description"]:
+        el = item.find(tag, content_ns) or item.find(tag)
+        if el is not None and el.text:
+            m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', el.text, re.IGNORECASE)
+            if m:
+                cleaned = clean_extracted_image_url(m.group(1))
+                if cleaned:
+                    return cleaned
+
     return None
 
 
@@ -1097,17 +1113,16 @@ def _pre_vet_one(url):
     """Fetch and check one image; add to APPROVED_URLS if it passes."""
     if url in APPROVED_URLS:
         return
-    # AP dims URLs are editorially curated — auto-approve without cv2.
-    if "dims.apnews.com" in url:
+    # AP dims and BBC URLs — auto-approve, rely on URL blocklist for filtering.
+    if "dims.apnews.com" in url or "bbci.co.uk" in url or "bbc.co.uk" in url:
         APPROVED_URLS.add(url)
         return
-    # Non-BBC, non-Guardian sources — approve without cv2 checks.
-    is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
+    # Non-Guardian sources — approve without cv2.
     is_guardian = "guim.co.uk" in url or "theguardian.com" in url
-    if not is_bbc and not is_guardian:
+    if not is_guardian:
         APPROVED_URLS.add(url)
         return
-    # BBC and Guardian — run cv2 checks to filter portraits/graphics/dividers.
+    # Guardian — run cv2 checks to filter portraits/graphics/dividers.
     try:
         data, content_type = fetch_bytes(url, timeout=8)
         if not content_type.startswith("image/"):
