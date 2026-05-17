@@ -32,9 +32,18 @@ RSS_FEEDS = [
     # Al Jazeera — was working before.
     "https://www.aljazeera.com/xml/rss/all.xml",
 
+    # Guardian RSS — backup while API is rate limited.
+    "https://www.theguardian.com/world/rss",
+    "https://www.theguardian.com/us-news/rss",
+    "https://www.theguardian.com/world/middleeast/rss",
+    "https://www.theguardian.com/world/europe-news/rss",
+
     # BBC: backup only, capped low.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
+
+    # Der Spiegel — backup.
+    "https://www.spiegel.de/international/index.rss",
 ]
 
 SOURCE_PAGES = [
