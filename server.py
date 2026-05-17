@@ -518,6 +518,7 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "static.reuters.com",
             "cloudfront-us-east-2.images.arcpublishing.com",
             "media.guim.co.uk",
+            "i.guim.co.uk",
             "npr.brightspotcdn.com",
             "img.aljazeera.net",
             "www.aljazeera.com/wp-content",
@@ -540,6 +541,12 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             return False
         if "interactive.guim.co.uk" in lower:
             return False
+        # i.guim.co.uk: block staff photos and tiny thumbnails.
+        if "i.guim.co.uk" in lower:
+            if "/img/uploads/" in lower or "/img/static/" in lower:
+                return False
+            if "width=80" in lower or "width=100" in lower:
+                return False
         # Guardian composite/collage images — always divided layouts.
         if "guim.co.uk" in lower and "_0_5000_4000" in lower:
             return False
@@ -1444,17 +1451,16 @@ def image_has_center_divider(data):
 def render_html():
     with IMAGE_CACHE["lock"]:
         cached = IMAGE_CACHE["images"][:]
-    # Embed first 10 AP dims URLs directly — these are safe and load instantly
-    # without waiting for pre-vetting. Rest come via /images.json poll.
-    seed = [img for img in cached 
-            if "dims.apnews.com" in img 
+    # Seed with Guardian images first (proxy reliably), then AP as fallback.
+    seed = [img for img in cached
+            if "guim.co.uk" in img
             and not url_is_known_bad(img)
-            and img not in REJECT_CACHE][:10]
-    if not seed:
-        seed = [img for img in cached 
-                if not url_is_known_bad(img) 
-                and img not in REJECT_CACHE
-                and img in APPROVED_URLS][:10]
+            and img in APPROVED_URLS][:10]
+    if len(seed) < 5:
+        seed += [img for img in cached
+                 if "dims.apnews.com" in img
+                 and not url_is_known_bad(img)
+                 and img not in REJECT_CACHE][:10 - len(seed)]
     sequence = []
     for img in seed:
         proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
