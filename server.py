@@ -17,22 +17,7 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
-    # AP feeds — the only reliable wire source.
-    "https://feeds.apnews.com/rss/apf-topnews",
-    "https://feeds.apnews.com/rss/apf-WorldNews",
-    "https://feeds.apnews.com/rss/apf-usnews",
-    "https://feeds.apnews.com/rss/apf-politics",
-    "https://feeds.apnews.com/rss/apf-intlnews",
-    "https://feeds.apnews.com/rss/apf-africa",
-    "https://feeds.apnews.com/rss/apf-asiapacific",
-    "https://feeds.apnews.com/rss/apf-europe",
-    "https://feeds.apnews.com/rss/apf-latinamerica",
-    "https://feeds.apnews.com/rss/apf-middleeast",
-
-    # Al Jazeera — was working before.
-    "https://www.aljazeera.com/xml/rss/all.xml",
-
-    # Guardian RSS — good photojournalism, different from API.
+    # Guardian RSS — working well, good photojournalism.
     "https://www.theguardian.com/world/rss",
     "https://www.theguardian.com/us-news/rss",
     "https://www.theguardian.com/world/middleeast/rss",
@@ -102,6 +87,7 @@ REJECT_CACHE_SECONDS = 1800
 APPROVED_URLS = set()
 
 GUARDIAN_API_ENABLED = True
+GUARDIAN_API_KEY = "66bece60-5ad3-4d04-9f77-d27e8a4122c2"
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics", "environment",
     "global-development", "immigration",
@@ -208,6 +194,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "409aac70",
     "62f61850",
     "b4133310",
+    "25317530",
+    "5d62c560",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -271,6 +259,9 @@ def clean_extracted_image_url(url):
     ]
     fname_lower = urllib.parse.urlparse(url).path.lower()
     if any(t in fname_lower for t in sports_entertainment_terms):
+        return None
+    # BBC photos are always .jpg — .png from BBC is always a graphic/illustration.
+    if "bbci.co.uk" in lower and lower.endswith(".png"):
         return None
     if "assets.apnews.com" in lower and lower.endswith(".png"):
         return None
