@@ -1,4 +1,3 @@
-
 import json
 import os
 import random
@@ -197,6 +196,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "a66a935e60878e7844fa2d1051c9f0144b334d9c",
     "a983c310",
     "73d3ef6a2b06188911f5c7e1a5c6480e935e942d",
+    "bf0f4d3fe009178469f4c44167b12a3e857fd72a",
+    "374c252854b26a9d2508b2fcfd25097469852efb",
+    "a15c3d426bf3ab77265f232394e5eccb3f7f96af",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1518,7 +1520,7 @@ def render_html():
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
-#debug-url {{ position:fixed; bottom:8px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,.42); font:10px/1.4 monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90vw; z-index:50; cursor:copy; user-select:none; pointer-events:auto; background:rgba(0,0,0,.22); padding:2px 5px; border-radius:3px; }}
+#debug-url {{ display: none; }}
 </style>
 </head>
 <body>
@@ -1570,7 +1572,7 @@ function startSlideshow() {{
       loadRandomSlide();
     }}
     prepareNextSlide();
-    setTimeout(rotateSlides, 6000 + Math.random() * 1000);
+    setTimeout(rotateSlides, 8000);
   }}
 
   (function waitForFirst() {{
