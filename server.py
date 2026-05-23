@@ -117,7 +117,7 @@ def fetch_guardian_api_images(limit=200):
                     continue
                 # i.guim.co.uk is the resizing CDN used for thumbnails/bylines.
                 # Real news photos are on media.guim.co.uk.
-                if "i.guim.co.uk" in img_url:
+                if "i.guim.co.uk" in img_url or "interactive.guim.co.uk" in img_url or "static.theguardian.com" in img_url:
                     continue
                 # Upgrade to large size.
                 img_url = re.sub(r'width=\d+', 'width=2000', img_url)
