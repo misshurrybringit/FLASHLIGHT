@@ -1075,7 +1075,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     bbc_imgs = [img for img in images if source_category(img) == "bbc"]
 
     # Within each source, images were added in feed order (newest first) — preserve that.
-    ordered = ap_imgs + guardian_imgs + other_imgs + bbc_imgs
+    ordered = guardian_imgs + ap_imgs + other_imgs + bbc_imgs
 
     with IMAGE_CACHE["lock"]:
         IMAGE_CACHE["time"] = now
@@ -1489,11 +1489,11 @@ def image_has_center_divider(data):
 def render_html():
     with IMAGE_CACHE["lock"]:
         cached = IMAGE_CACHE["images"][:]
-    # Seed with Guardian images first (proxy reliably), then AP as fallback.
+    # Seed with Guardian images first — include approved and pending (not rejected).
     seed = [img for img in cached
             if "guim.co.uk" in img
             and not url_is_known_bad(img)
-            and img in APPROVED_URLS][:10]
+            and img not in REJECT_CACHE][:10]
     if len(seed) < 5:
         seed += [img for img in cached
                  if "dims.apnews.com" in img
@@ -1520,7 +1520,7 @@ def render_html():
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
-#debug-url {{ display: none; }}
+#debug-url {{ position:fixed; bottom:8px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,.42); font:10px/1.4 monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90vw; z-index:50; cursor:copy; user-select:none; pointer-events:auto; background:rgba(0,0,0,.22); padding:2px 5px; border-radius:3px; }}
 </style>
 </head>
 <body>
@@ -1600,10 +1600,14 @@ function startSlideshow() {{
               for (const item of fresh) {{
                 if (!badSrcs.has(item.src) && slideAllowedForCurrentOrientation(item)) newSrcs.push(item.src);
               }}
-              if (newSrcs.length > 0) shuffledPool = shuffledPool.concat(shuffleArray(newSrcs));
+              if (newSrcs.length > 0) {{
+                // Insert new images right after current position so they appear soon.
+                const insertAt = Math.min(poolIndex + 1, shuffledPool.length);
+                shuffledPool.splice(insertAt, 0, ...shuffleArray(newSrcs));
+              }}
               if (!currentImage) loadRandomSlide();
             }}
-            setTimeout(refresh, slides.length > 50 ? 30000 : 3000);
+            setTimeout(refresh, slides.length > 50 ? 15000 : 3000);
           }} else {{ setTimeout(refresh, 2000); }}
         }} else {{ setTimeout(refresh, 2000); }}
       }} catch(e) {{ setTimeout(refresh, 2000); }}
