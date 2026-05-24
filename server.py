@@ -1520,7 +1520,7 @@ def render_html():
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
-#debug-url {{ position:fixed; bottom:8px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,.42); font:10px/1.4 monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90vw; z-index:50; cursor:copy; user-select:none; pointer-events:auto; background:rgba(0,0,0,.22); padding:2px 5px; border-radius:3px; }}
+#debug-url {{ display: none; }}
 </style>
 </head>
 <body>
@@ -1543,7 +1543,7 @@ function startSlideshow() {{
   }})();
 
   // Consistent rotation with preloading.
-  const SLIDE_INTERVAL = 6000 + Math.random() * 1000;
+  const SLIDE_INTERVAL = 8000;
   let _nextPreloaded = null;
   let _nextSrc = null;
 
