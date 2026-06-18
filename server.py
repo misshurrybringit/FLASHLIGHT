@@ -96,7 +96,7 @@ def fetch_guardian_api_images(limit=200):
                 f"?section={section}&show-fields=main&page-size=50"
                 f"&order-by=newest&api-key={GUARDIAN_API_KEY}"
             )
-            data = fetch_text(url, timeout=6)
+            data = fetch_text(url, timeout=3)
             blob = json.loads(data)
             results = blob.get("response", {}).get("results", [])
             for item in results:
@@ -985,6 +985,40 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     return ordered[:limit]
 
 
+def _fast_startup_seed():
+    """Quickly populate cache with BBC images so the page isn't black on first load."""
+    print("[STARTUP] Fast seeding from BBC RSS …", flush=True)
+    images = []
+    seen = set()
+    try:
+        for feed_url in ["https://feeds.bbci.co.uk/news/world/rss.xml",
+                         "https://feeds.bbci.co.uk/news/rss.xml"]:
+            try:
+                rss = fetch_text(feed_url, timeout=4.0)
+                root = ET.fromstring(rss)
+                for item in root.findall(".//item")[:30]:
+                    img = extract_rss_item_image(item)
+                    if not img:
+                        continue
+                    cleaned = clean_extracted_image_url(img)
+                    if not cleaned or url_is_known_bad(cleaned):
+                        continue
+                    key = canonical_image_key(cleaned)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    images.append(cleaned)
+            except Exception as e:
+                print(f"[STARTUP] Feed error: {e}", flush=True)
+    except Exception as e:
+        print(f"[STARTUP] Seed error: {e}", flush=True)
+    if images:
+        with IMAGE_CACHE["lock"]:
+            IMAGE_CACHE["images"] = images
+            IMAGE_CACHE["time"] = time.time() - CACHE_SECONDS + 30  # expire soon so full build replaces it
+        print(f"[STARTUP] Seeded {len(images)} BBC images for fast first load", flush=True)
+
+
 def _background_pool_refresher():
     """Continuously rebuild the image pool so the cache is always warm."""
     refresh_count = 0
@@ -1430,7 +1464,7 @@ function startSlideshow() {{
   resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); preloadNext();
 
   (function tryLoad() {{
-    if (!currentImage) {{ loadRandomSlide(); setTimeout(tryLoad, 500); }}
+    if (!currentImage) {{ loadRandomSlide(); setTimeout(tryLoad, currentImage ? 1000 : 300); }}
   }})();
 
   // Consistent rotation with preloading.
@@ -1492,16 +1526,19 @@ function startSlideshow() {{
                 if (!badSrcs.has(item.src) && slideAllowedForCurrentOrientation(item)) newSrcs.push(item.src);
               }}
               if (newSrcs.length > 0) {{
-                // Insert new images right after current position so they appear soon.
                 const insertAt = Math.min(poolIndex + 1, shuffledPool.length);
                 shuffledPool.splice(insertAt, 0, ...shuffleArray(newSrcs));
               }}
               if (!currentImage) loadRandomSlide();
             }}
-            setTimeout(refresh, slides.length > 50 ? 15000 : 3000);
-          }} else {{ setTimeout(refresh, 2000); }}
-        }} else {{ setTimeout(refresh, 2000); }}
-      }} catch(e) {{ setTimeout(refresh, 2000); }}
+            // Poll fast until we have enough images, then slow down.
+            const hasEnough = slides.length > 50;
+            setTimeout(refresh, hasEnough ? 15000 : currentImage ? 3000 : 500);
+          }} else {{
+            setTimeout(refresh, currentImage ? 2000 : 500);
+          }}
+        }} else {{ setTimeout(refresh, currentImage ? 2000 : 500); }}
+      }} catch(e) {{ setTimeout(refresh, currentImage ? 2000 : 500); }}
     }}
     setTimeout(refresh, 0);
   }})();
@@ -1950,4 +1987,7 @@ if __name__ == "__main__":
     print()
     bg = threading.Thread(target=_background_pool_refresher, daemon=True)
     bg.start()
+    # Fast seed so the page isn't black while the full pool builds.
+    seed_thread = threading.Thread(target=_fast_startup_seed, daemon=True)
+    seed_thread.start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
