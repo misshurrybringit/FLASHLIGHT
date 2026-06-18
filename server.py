@@ -196,6 +196,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "374c252854b26a9d2508b2fcfd25097469852efb",
     "a15c3d426bf3ab77265f232394e5eccb3f7f96af",
     "40755c81-979d-4d99-a472-2258517838b3",
+    "86cf2180-68ca-11f1-b1db-af71d47507d6",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -229,6 +230,10 @@ def upgrade_bbc_image_url(url):
     url = url.replace("/660/", "/1024/")
     url = re.sub(r"/ic/\d+x\d+/", "/ic/1024x576/", url)
     url = re.sub(r"/standard/\d+/", "/standard/1024/", url)
+    # Upgrade NPR brightspotcdn resize to full size.
+    if "brightspotcdn" in url:
+        url = re.sub(r'/resize/\d+/', '/resize/1400/', url)
+        url = re.sub(r'quality/\d+/', 'quality/90/', url)
     return url
 
 
@@ -263,6 +268,15 @@ def clean_extracted_image_url(url):
         return None
     # BBC /images/ic/ URLs with programme IDs (p0...) are show/podcast assets, not news photos.
     if "bbci.co.uk/images/ic/" in lower and "/p0" in lower:
+        return None
+    # NPR: media.npr.org is podcast/asset domain, not news photos. Block podcast tiles too.
+    if "media.npr.org" in lower:
+        return None
+    if "brightspotcdn" in lower and any(bad in lower for bad in [
+        "_sq-", "podcasttile", "podcast", "music", "games-we-love",
+        "puzzle", "quiz", "crossword", "default-wide", "placeholder",
+        "share-image", "shareimage",
+    ]):
         return None
     return upgrade_bbc_image_url(url)
 
