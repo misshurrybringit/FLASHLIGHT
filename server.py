@@ -47,6 +47,8 @@ SOURCE_PAGES = [
     "https://www.reuters.com/world/middle-east/",
     "https://www.reuters.com/world/africa/",
     "https://www.reuters.com/pictures/",
+    "https://www.reuters.com/business/",
+    "https://www.reuters.com/science/",
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
 ]
@@ -157,7 +159,8 @@ def get_guardian_api_images():
         GUARDIAN_API_CACHE["images"] = images
         GUARDIAN_API_CACHE["time"] = now
     return images
-MIN_IMAGE_HEIGHT = 430
+MIN_IMAGE_WIDTH = 800
+MIN_IMAGE_HEIGHT = 540
 
 KNOWN_BAD_URL_FRAGMENTS = [
     "p0l7jnbt", "p0kxxp17", "p0n9y769", "3a08bc10", "b9785300",
@@ -848,7 +851,7 @@ def source_category(url):
     lower = (url or "").lower()
     if "apnews.com" in lower or "assets.apnews.com" in lower or "dims.apnews.com" in lower:
         return "ap"
-    if "reuters" in lower:
+    if "reuters" in lower or "arcpublishing.com" in lower:
         return "reuters"
     if "guim.co.uk" in lower or "theguardian" in lower:
         return "guardian"
@@ -875,7 +878,7 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     mixed = (
         buckets["guardian"][:400]
         + buckets["ap"][:300]
-        + buckets["reuters"][:100]
+        + buckets["reuters"][:250]
         + buckets["other"][:100]
         + buckets["bbc"][:120]
         + buckets["spiegel"][:80]
@@ -1662,6 +1665,7 @@ const _shownThisCycle = new Set();
 function sourceScore(src) {{
   if (src.includes('guim.co.uk')) return 0;
   if (src.includes('dims.apnews.com')) return 1;
+  if (src.includes('reuters') || src.includes('arcpublishing')) return 2;
   if (src.includes('bbci.co.uk')) return 2;
   if (src.includes('spiegel.de')) return 3;
   return 2;
