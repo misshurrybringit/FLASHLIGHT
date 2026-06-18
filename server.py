@@ -77,7 +77,8 @@ GUARDIAN_API_ENABLED = True
 GUARDIAN_API_KEY = "55e2b57b-70cb-4542-a4b4-83971a720752"
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics", "environment",
-    "global-development", "immigration",
+    "global-development", "immigration", "science",
+    "society", "technology", "business", "culture",
 ]
 
 
@@ -754,7 +755,7 @@ def source_category(url):
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     """Favor Guardian; NPR and BBC as secondary."""
-    buckets = {"reuters": [], "guardian": [], "npr": [], "bbc": [], "other": []}
+    buckets = {"guardian": [], "npr": [], "bbc": [], "other": []}
     for img in images:
         buckets.setdefault(source_category(img), []).append(img)
 
@@ -762,10 +763,10 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         random.shuffle(bucket)
 
     mixed = (
-        buckets["guardian"][:500]
-        + buckets["npr"][:200]
-        + buckets["bbc"][:120]
+        buckets["guardian"][:600]
+        + buckets["npr"][:150]
         + buckets["other"][:80]
+        + buckets["bbc"][:120]
     )
 
     bbc_in_mixed = sum(1 for i in mixed if source_category(i) == "bbc")
@@ -1032,7 +1033,9 @@ def _pre_vet_one(url):
             REJECT_CACHE[url] = {"time": time.time()}
             return
         ih, iw = img.shape[:2]
-        if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
+        min_w = 1000 if "brightspotcdn" in url else MIN_IMAGE_WIDTH
+        min_h = 600 if "brightspotcdn" in url else MIN_IMAGE_HEIGHT
+        if iw < min_w or ih < min_h:
             REJECT_CACHE[url] = {"time": time.time()}
             return
         if ih > iw * 1.4:
@@ -1534,7 +1537,6 @@ function sourceScore(src) {{
   if (src.includes('guim.co.uk')) return 0;
   if (src.includes('brightspotcdn')) return 1;
   if (src.includes('bbci.co.uk')) return 2;
-  if (src.includes('arcpublishing')) return 2;
   return 3;
 }}
 function refillPool() {{
@@ -1907,7 +1909,10 @@ class Handler(BaseHTTPRequestHandler):
                     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                     if img is not None:
                         ih, iw = img.shape[:2]
-                        if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
+                        # Higher resolution floor for NPR — their images are often soft.
+                        min_w = 1000 if "brightspotcdn" in url else MIN_IMAGE_WIDTH
+                        min_h = 600 if "brightspotcdn" in url else MIN_IMAGE_HEIGHT
+                        if iw < min_w or ih < min_h:
                             REJECT_CACHE[url] = {"time": time.time()}
                             self.safe_send_bytes(415, b"Rejected low resolution image", extra_headers={"Cache-Control": "no-store"})
                             return
