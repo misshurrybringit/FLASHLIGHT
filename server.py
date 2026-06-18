@@ -24,8 +24,8 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
 
-    # Der Spiegel — backup.
-    "https://www.spiegel.de/international/index.rss",
+    # Reuters via Google News — provides article links we can scrape for arcpublishing images.
+    "https://news.google.com/rss/search?q=site:reuters.com&ceid=US:en&hl=en-US&gl=US",
 ]
 
 SOURCE_PAGES = [
@@ -40,17 +40,10 @@ SOURCE_PAGES = [
     "https://apnews.com/hub/africa",
     "https://apnews.com/hub/latin-america",
     "https://apnews.com/hub/asia-pacific",
-    "https://www.reuters.com/world/",
-    "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/world/europe/",
-    "https://www.reuters.com/world/asia-pacific/",
-    "https://www.reuters.com/world/middle-east/",
-    "https://www.reuters.com/world/africa/",
-    "https://www.reuters.com/pictures/",
-    "https://www.reuters.com/business/",
-    "https://www.reuters.com/science/",
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
+    "https://www.theguardian.com/politics",
+    "https://www.theguardian.com/environment",
 ]
 
 
@@ -202,6 +195,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "bf0f4d3fe009178469f4c44167b12a3e857fd72a",
     "374c252854b26a9d2508b2fcfd25097469852efb",
     "a15c3d426bf3ab77265f232394e5eccb3f7f96af",
+    "40755c81-979d-4d99-a472-2258517838b3",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -270,6 +264,8 @@ def clean_extracted_image_url(url):
     if "bbci.co.uk" in lower and lower.endswith(".png"):
         return None
     if "assets.apnews.com" in lower and lower.endswith(".png"):
+        return None
+    if "spiegel.de" in lower and lower.endswith(".png"):
         return None
     # BBC /images/ic/ URLs with programme IDs (p0...) are show/podcast assets, not news photos.
     if "bbci.co.uk/images/ic/" in lower and "/p0" in lower:
@@ -881,13 +877,12 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         + buckets["reuters"][:250]
         + buckets["other"][:100]
         + buckets["bbc"][:120]
-        + buckets["spiegel"][:80]
     )
 
     bbc_in_mixed = sum(1 for i in mixed if source_category(i) == "bbc")
     remaining = []
     already = set(canonical_image_key(i) for i in mixed)
-    for name in ["ap", "reuters", "guardian", "npr", "other", "spiegel"]:
+    for name in ["ap", "reuters", "guardian", "npr", "other"]:
         for img in buckets[name]:
             key = canonical_image_key(img)
             if key not in already:
@@ -1645,7 +1640,7 @@ let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
-const RECENT_LIMIT = 800;
+const RECENT_LIMIT = 1200;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -1684,7 +1679,7 @@ function refillPool() {{
   candidates = [...new Set(candidates)];
 
   let fresh = candidates.filter(src => !_shownThisCycle.has(src));
-  if (fresh.length < 5) {{
+  if (fresh.length < 15) {{
     _shownThisCycle.clear();
     fresh = candidates;
   }}
