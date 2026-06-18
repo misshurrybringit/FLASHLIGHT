@@ -223,13 +223,14 @@ def url_needs_voice_crop(url):
 def upgrade_bbc_image_url(url):
     if not url:
         return url
-    url = url.replace("/240/", "/1024/")
-    url = url.replace("/320/", "/1024/")
-    url = url.replace("/480/", "/1024/")
-    url = url.replace("/624/", "/1024/")
-    url = url.replace("/660/", "/1024/")
-    url = re.sub(r"/ic/\d+x\d+/", "/ic/1024x576/", url)
-    url = re.sub(r"/standard/\d+/", "/standard/1024/", url)
+    url = url.replace("/240/", "/2048/")
+    url = url.replace("/320/", "/2048/")
+    url = url.replace("/480/", "/2048/")
+    url = url.replace("/624/", "/2048/")
+    url = url.replace("/660/", "/2048/")
+    url = url.replace("/1024/", "/2048/")
+    url = re.sub(r"/ic/\d+x\d+/", "/ic/2048x1152/", url)
+    url = re.sub(r"/standard/\d+/", "/standard/2048/", url)
     # Upgrade NPR brightspotcdn resize to full size.
     if "brightspotcdn" in url:
         url = re.sub(r'/resize/\d+/', '/resize/1400/', url)
