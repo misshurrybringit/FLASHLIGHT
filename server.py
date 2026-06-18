@@ -24,8 +24,10 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
 
-    # Reuters via Google News — provides article links we can scrape for arcpublishing images.
-    "https://news.google.com/rss/search?q=site:reuters.com&ceid=US:en&hl=en-US&gl=US",
+    # NPR
+    "https://feeds.npr.org/1001/rss.xml",
+    "https://feeds.npr.org/1004/rss.xml",
+    "https://feeds.npr.org/1003/rss.xml",
 ]
 
 SOURCE_PAGES = [
@@ -1499,8 +1501,11 @@ def render_html():
                  and img not in REJECT_CACHE][:10 - len(seed)]
     sequence = []
     for img in seed:
-        proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
-        sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
+        if "dims.apnews.com" in img or "assets.apnews.com" in img:
+            src = img  # serve AP directly from browser
+        else:
+            src = "/proxy?url=" + urllib.parse.quote(img, safe="")
+        sequence.append({"src": src, "raw": img, "verticalOnly": url_is_vertical_only(img)})
     sequence_json = json.dumps(sequence).replace('\n', '\\n').replace('\r', '')
     return f'''<!DOCTYPE html>
 <html>
@@ -1769,7 +1774,7 @@ function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
   recentlyShown.push(src); if (recentlyShown.length > RECENT_LIMIT) recentlyShown.shift();
   _shownThisCycle.add(src);
-  const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
+  const rawUrl = src.startsWith('/proxy?url=') ? decodeURIComponent(src.replace("/proxy?url=", "")) : src;
   const usableEstimate = Math.max(0, slides.length - badSrcs.size);
   const el = document.getElementById("debug-url");
   el.textContent = rawUrl + "  [recent " + recentlyShown.length + " / usable ~" + usableEstimate + " / bad " + badSrcs.size + "]";
@@ -1897,14 +1902,17 @@ class Handler(BaseHTTPRequestHandler):
             # If APPROVED_URLS is empty (first boot), return everything so client isn't blank.
             if APPROVED_URLS:
                 cached = [img for img in cached
-                         if "dims.apnews.com" not in img
-                         and (img in APPROVED_URLS
+                         if "dims.apnews.com" in img  # always include AP — served directly
+                         or (img in APPROVED_URLS
                               or (img not in REJECT_CACHE
                                   and not url_is_known_bad(img)))]
             sequence = []
             for img in cached:
-                proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
-                sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
+                if "dims.apnews.com" in img or "assets.apnews.com" in img:
+                    src = img  # serve AP directly from browser
+                else:
+                    src = "/proxy?url=" + urllib.parse.quote(img, safe="")
+                sequence.append({"src": src, "raw": img, "verticalOnly": url_is_vertical_only(img)})
             data = json.dumps(sequence).encode("utf-8")
             self.safe_send_bytes(200, data, "application/json; charset=utf-8", {"Cache-Control": "no-store"})
             return
