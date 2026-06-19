@@ -262,7 +262,7 @@ def clean_extracted_image_url(url):
     # Guardian: reject portrait crops by checking dimensions in URL path.
     # Format: /hash/x_y_width_height/size.jpg — reject if height > width.
     if "media.guim.co.uk" in lower:
-        m = re.search(r'/\d+_\d+_(\d+)_(\d+)/', parsed.path)
+        m = re.search(r'/\d+_\d+_(\d+)_(\d+)/', urllib.parse.urlparse(url).path)
         if m:
             crop_w, crop_h = int(m.group(1)), int(m.group(2))
             if crop_h > crop_w:
