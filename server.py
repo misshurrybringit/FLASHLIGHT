@@ -187,6 +187,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "86cf2180-68ca-11f1-b1db-af71d47507d6",
     "a2e8a279-839a-40d3-83f8-dc65df0dbc72",
     "48c2f1158b35ff75cb2edcbb613c747af1215f74",
+    "321b5880-4a2e-11f1-91d3-69962f9a0625",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -221,10 +222,6 @@ def upgrade_bbc_image_url(url):
     url = url.replace("/1024/", "/2048/")
     url = re.sub(r"/ic/\d+x\d+/", "/ic/2048x1152/", url)
     url = re.sub(r"/standard/\d+/", "/standard/2048/", url)
-    # Upgrade NPR brightspotcdn resize to full size.
-    if "brightspotcdn" in url:
-        url = re.sub(r'/resize/\d+/', '/resize/1400/', url)
-        url = re.sub(r'quality/\d+/', 'quality/90/', url)
     return url
 
 
@@ -257,15 +254,9 @@ def clean_extracted_image_url(url):
         return None
     if "spiegel.de" in lower and lower.endswith(".png"):
         return None
-    if "brightspotcdn" in lower and lower.endswith(".png"):
+    # Reject NPR entirely — not a source anymore.
+    if "brightspotcdn" in lower or "media.npr.org" in lower:
         return None
-    if "brightspotcdn" in lower and "format/png" in lower:
-        return None
-    if "brightspotcdn" in lower and ".s3.amazonaws.com" in lower:
-        # Check inner asset URL for PNG
-        inner = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("url", [""])[0]
-        if inner.lower().endswith(".png"):
-            return None
     # BBC /images/ic/ URLs with programme IDs (p0...) are show/podcast assets, not news photos.
     if "bbci.co.uk/images/ic/" in lower and "/p0" in lower:
         return None
@@ -277,14 +268,6 @@ def clean_extracted_image_url(url):
             crop_w, crop_h = int(m.group(1)), int(m.group(2))
             if crop_h > crop_w:
                 return None
-    if "media.npr.org" in lower:
-        return None
-    if "brightspotcdn" in lower and any(bad in lower for bad in [
-        "_sq-", "podcasttile", "podcast", "music", "games-we-love",
-        "puzzle", "quiz", "crossword", "default-wide", "placeholder",
-        "share-image", "shareimage",
-    ]):
-        return None
     return upgrade_bbc_image_url(url)
 
 
@@ -398,7 +381,7 @@ def extract_inline_images_from_html(html, base_url, max_images=35):
             if key in seen:
                 continue
             lower = img.lower()
-            if not any(token in lower for token in ["ichef.bbci", "cloudfront", "reuters", "guardian", "npr", "brightspotcdn"]):
+            if not any(token in lower for token in ["ichef.bbci", "cloudfront", "reuters", "guardian"]):
                 continue
             seen.add(key)
             imgs.append(img)
@@ -534,16 +517,12 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "cloudfront-us-east-2.images.arcpublishing.com",
             "media.guim.co.uk",
             "i.guim.co.uk",
-            "npr.brightspotcdn.com",
             "img.aljazeera.net",
             "www.aljazeera.com/wp-content",
             ".jpg",
             ".jpeg",
             ".webp",
         ]):
-            return False
-        # media.npr.org is NPR's placeholder/logo domain — real NPR photos use brightspotcdn.
-        if "media.npr.org" in lower:
             return False
         # Guardian author avatars and small images.
         if "yimg.com" in lower and (";w=80;" in lower or ";h=60;" in lower or "logo" in lower):
@@ -558,12 +537,6 @@ def extract_image_urls_from_html(html, base_url, limit=80):
                 return False
         # Guardian composite/collage images — always divided layouts.
         if "guim.co.uk" in lower and "_5000_4000" in lower:
-            return False
-        # NPR brightspotcdn URLs with non-news filenames (games, puzzles, podcasts etc).
-        if "brightspotcdn" in lower and any(bad in lower for bad in [
-            "games-we-love", "podcast", "music", "puzzle", "quiz", "crossword",
-            "default-wide", "placeholder", "share-image", "shareimage",
-        ]):
             return False
 
         key = normalize_image_url_for_dedupe(img)
@@ -593,7 +566,6 @@ def extract_image_urls_from_html(html, base_url, limit=80):
     url_patterns = [
         r'https://cloudfront-us-east-2\.images\.arcpublishing\.com/[^"\'\s<>]+',
         r'https://media\.guim\.co\.uk/[^"\'\s<>]+',
-        r'https://npr\.brightspotcdn\.com/[^"\'\s<>]+',
     ]
     for pattern in url_patterns:
         for m in re.finditer(pattern, expanded, re.IGNORECASE):
@@ -765,8 +737,6 @@ def source_category(url):
         return "reuters"
     if "guim.co.uk" in lower or "theguardian" in lower:
         return "guardian"
-    if "npr" in lower or "brightspotcdn" in lower:
-        return "npr"
     if "aljazeera" in lower:
         return "other"
     if "bbci.co.uk" in lower or "bbc.co.uk" in lower:
@@ -1085,9 +1055,9 @@ def _pre_vet_one(url):
             REJECT_CACHE[url] = {"time": time.time()}
             return
         ih, iw = img.shape[:2]
-        min_w = 1000 if "brightspotcdn" in url else MIN_IMAGE_WIDTH
-        min_h = 600 if "brightspotcdn" in url else MIN_IMAGE_HEIGHT
-        if iw < min_w or ih < min_h:
+        min_w = MIN_IMAGE_WIDTH
+        min_h = MIN_IMAGE_HEIGHT
+        if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
             REJECT_CACHE[url] = {"time": time.time()}
             return
         if ih > iw * 1.4:
@@ -1373,9 +1343,9 @@ def image_has_center_divider(data):
         dark_by_row = np.mean(dark_band, axis=1) > 0.45
         for line_by_row in (bright_by_row, dark_by_row):
             full_height_frac = float(np.mean(line_by_row))
-            if full_height_frac > 0.58:
+            if full_height_frac > 0.50:
                 return True
-            if full_height_frac > 0.42:
+            if full_height_frac > 0.35:
                 transitions = np.diff(line_by_row.astype(np.int8))
                 if int(np.sum(transitions == 1)) <= 8:
                     return True
@@ -1388,28 +1358,26 @@ def image_has_center_divider(data):
     baseline = float(np.median(col_energy)) + 1e-6
     # Count how many columns have strong vertical edge energy — multiple dividers
     # show up as multiple high-energy columns across the image.
-    strong_cols = np.sum(center_energy > baseline * 2.2)
+    strong_cols = np.sum(center_energy > baseline * 1.8)
     if strong_cols >= 2:
-        # Check each strong column spans most of the image height.
-        strong_col_indices = np.where(center_energy > baseline * 2.2)[0]
+        strong_col_indices = np.where(center_energy > baseline * 1.8)[0]
         for ci in strong_col_indices:
             abs_ci = center_min + ci
             col_slice = edge_strength[:, max(0, abs_ci - 1):min(w, abs_ci + 2)]
             row_strength = col_slice.mean(axis=1)
             row_baseline = float(np.median(row_strength)) + 1e-6
-            strong_frac = float(np.mean(row_strength > row_baseline * 1.55))
-            if strong_frac > 0.38:
+            strong_frac = float(np.mean(row_strength > row_baseline * 1.4))
+            if strong_frac > 0.32:
                 return True
-    # Single divider check — original logic.
     divider_x = center_min + int(np.argmax(center_energy))
     peak_energy = float(col_energy[divider_x])
-    if peak_energy < baseline * 2.2:
+    if peak_energy < baseline * 1.8:
         return False
     col_slice = edge_strength[:, max(0, divider_x - 1):min(w, divider_x + 2)]
     row_strength = col_slice.mean(axis=1)
     row_baseline = float(np.median(row_strength)) + 1e-6
-    strong_frac = float(np.mean(row_strength > row_baseline * 1.55))
-    return strong_frac > 0.38
+    strong_frac = float(np.mean(row_strength > row_baseline * 1.4))
+    return strong_frac > 0.32
 
 
 def render_html():
@@ -1422,7 +1390,7 @@ def render_html():
             and img not in REJECT_CACHE][:10]
     if len(seed) < 5:
         seed += [img for img in cached
-                 if "brightspotcdn" in img
+                 if "bbci.co.uk" in img
                  and not url_is_known_bad(img)
                  and img not in REJECT_CACHE][:10 - len(seed)]
     sequence = []
@@ -1910,7 +1878,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/sources.json":
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            counts = {"bbc": 0, "reuters": 0, "guardian": 0, "npr": 0, "other": 0}
+            counts = {"bbc": 0, "reuters": 0, "guardian": 0, "other": 0}
             for img in images:
                 lower = img.lower()
                 if "bbci.co.uk" in lower:
@@ -1919,8 +1887,6 @@ class Handler(BaseHTTPRequestHandler):
                     counts["reuters"] += 1
                 elif "guim.co.uk" in lower or "theguardian" in lower:
                     counts["guardian"] += 1
-                elif "npr" in lower or "brightspotcdn" in lower:
-                    counts["npr"] += 1
                 else:
                     counts["other"] += 1
             data = json.dumps({"total": len(images), "counts": counts, "sample": images[:40]}, indent=2).encode("utf-8")
@@ -1964,9 +1930,9 @@ class Handler(BaseHTTPRequestHandler):
                     if img is not None:
                         ih, iw = img.shape[:2]
                         # Higher resolution floor for NPR — their images are often soft.
-                        min_w = 1000 if "brightspotcdn" in url else MIN_IMAGE_WIDTH
-                        min_h = 600 if "brightspotcdn" in url else MIN_IMAGE_HEIGHT
-                        if iw < min_w or ih < min_h:
+                        min_w = MIN_IMAGE_WIDTH
+                        min_h = MIN_IMAGE_HEIGHT
+                        if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
                             REJECT_CACHE[url] = {"time": time.time()}
                             self.safe_send_bytes(415, b"Rejected low resolution image", extra_headers={"Cache-Control": "no-store"})
                             return
