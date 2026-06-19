@@ -62,11 +62,10 @@ REJECT_CACHE_SECONDS = 1800
 APPROVED_URLS = set()
 
 GUARDIAN_API_ENABLED = True
-GUARDIAN_API_KEY = "55e2b57b-70cb-4542-a4b4-83971a720752"
+GUARDIAN_API_KEY = "92e99e1d-f706-45be-b06a-35af28e94141"
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics", "environment",
-    "global-development", "immigration", "science",
-    "society", "technology", "business", "culture",
+    "global-development", "immigration",
 ]
 
 
@@ -123,7 +122,7 @@ def fetch_guardian_api_images(limit=200):
     return images
 
 GUARDIAN_API_CACHE = {"images": [], "time": 0}
-GUARDIAN_API_CACHE_SECONDS = 3600  # 1 hour
+GUARDIAN_API_CACHE_SECONDS = 86400  # 24 hours — free tier is 12 req/day
 
 
 def get_guardian_api_images():
