@@ -23,11 +23,6 @@ RSS_FEEDS = [
     # BBC: backup only, capped low.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
-
-    # NPR
-    "https://feeds.npr.org/1001/rss.xml",
-    "https://feeds.npr.org/1004/rss.xml",
-    "https://feeds.npr.org/1003/rss.xml",
 ]
 
 SOURCE_PAGES = [
@@ -36,10 +31,6 @@ SOURCE_PAGES = [
     "https://www.theguardian.com/politics",
     "https://www.theguardian.com/global-development",
     "https://www.aljazeera.com/news/",
-    "https://www.npr.org/sections/world/",
-    "https://www.npr.org/sections/national/",
-    "https://www.npr.org/sections/politics/",
-    "https://www.npr.org/sections/health/",
 ]
 
 
@@ -195,6 +186,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "40755c81-979d-4d99-a472-2258517838b3",
     "86cf2180-68ca-11f1-b1db-af71d47507d6",
     "a2e8a279-839a-40d3-83f8-dc65df0dbc72",
+    "48c2f1158b35ff75cb2edcbb613c747af1215f74",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -265,10 +257,26 @@ def clean_extracted_image_url(url):
         return None
     if "spiegel.de" in lower and lower.endswith(".png"):
         return None
+    if "brightspotcdn" in lower and lower.endswith(".png"):
+        return None
+    if "brightspotcdn" in lower and "format/png" in lower:
+        return None
+    if "brightspotcdn" in lower and ".s3.amazonaws.com" in lower:
+        # Check inner asset URL for PNG
+        inner = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("url", [""])[0]
+        if inner.lower().endswith(".png"):
+            return None
     # BBC /images/ic/ URLs with programme IDs (p0...) are show/podcast assets, not news photos.
     if "bbci.co.uk/images/ic/" in lower and "/p0" in lower:
         return None
-    # NPR: media.npr.org is podcast/asset domain, not news photos. Block podcast tiles too.
+    # Guardian: reject portrait crops by checking dimensions in URL path.
+    # Format: /hash/x_y_width_height/size.jpg — reject if height > width.
+    if "media.guim.co.uk" in lower:
+        m = re.search(r'/\d+_\d+_(\d+)_(\d+)/', parsed.path)
+        if m:
+            crop_w, crop_h = int(m.group(1)), int(m.group(2))
+            if crop_h > crop_w:
+                return None
     if "media.npr.org" in lower:
         return None
     if "brightspotcdn" in lower and any(bad in lower for bad in [
@@ -767,8 +775,8 @@ def source_category(url):
 
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Favor Guardian; NPR and BBC as secondary."""
-    buckets = {"guardian": [], "npr": [], "bbc": [], "other": []}
+    """Favor Guardian; BBC as secondary."""
+    buckets = {"guardian": [], "bbc": [], "other": []}
     for img in images:
         buckets.setdefault(source_category(img), []).append(img)
 
@@ -776,16 +784,15 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         random.shuffle(bucket)
 
     mixed = (
-        buckets["guardian"][:600]
-        + buckets["npr"][:150]
-        + buckets["other"][:80]
+        buckets["guardian"][:700]
+        + buckets["other"][:100]
         + buckets["bbc"][:120]
     )
 
     bbc_in_mixed = sum(1 for i in mixed if source_category(i) == "bbc")
     remaining = []
     already = set(canonical_image_key(i) for i in mixed)
-    for name in ["guardian", "npr", "other"]:
+    for name in ["guardian", "other"]:
         for img in buckets[name]:
             key = canonical_image_key(img)
             if key not in already:
@@ -969,11 +976,9 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                 pass
 
     guardian_imgs = [img for img in images if source_category(img) == "guardian"]
-    npr_imgs = [img for img in images if source_category(img) == "npr"]
-    other_imgs = [img for img in images if source_category(img) not in ("guardian", "npr", "bbc")]
+    other_imgs = [img for img in images if source_category(img) not in ("guardian", "bbc")]
     bbc_imgs = [img for img in images if source_category(img) == "bbc"]
-
-    ordered = guardian_imgs + npr_imgs + other_imgs + bbc_imgs
+    ordered = guardian_imgs + other_imgs + bbc_imgs
 
     with IMAGE_CACHE["lock"]:
         IMAGE_CACHE["time"] = now
@@ -1585,9 +1590,8 @@ const badSrcs = new Set();
 const _shownThisCycle = new Set();
 function sourceScore(src) {{
   if (src.includes('guim.co.uk')) return 0;
-  if (src.includes('brightspotcdn')) return 1;
-  if (src.includes('bbci.co.uk')) return 2;
-  return 3;
+  if (src.includes('bbci.co.uk')) return 1;
+  return 2;
 }}
 function refillPool() {{
   let candidates = slides
