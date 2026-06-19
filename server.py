@@ -56,7 +56,7 @@ PROXY_CACHE_SECONDS = 600
 PROXY_CACHE_MAX_ITEMS = 200
 
 REJECT_CACHE = {}
-REJECT_CACHE_SECONDS = 1800
+REJECT_CACHE_SECONDS = 300  # 5 minutes — retry failed images sooner
 
 # URLs that passed cv2 checks during pool build — skip checks at serve time.
 APPROVED_URLS = set()
@@ -187,6 +187,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "a2e8a279-839a-40d3-83f8-dc65df0dbc72",
     "48c2f1158b35ff75cb2edcbb613c747af1215f74",
     "321b5880-4a2e-11f1-91d3-69962f9a0625",
+    "d91d9250-6b22-11f1-b1db-af71d47507d6",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -235,8 +236,10 @@ def clean_extracted_image_url(url):
     lower = url.lower()
     if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
         return None
-    # Reject SVG files.
+    # Reject SVG and GIF files.
     if lower.endswith(".svg") or ".svg?" in lower:
+        return None
+    if lower.endswith(".gif") or ".gif?" in lower:
         return None
     # Reject sports and entertainment images by filename keywords.
     sports_entertainment_terms = [
@@ -1953,7 +1956,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             except Exception as e:
                 REJECT_CACHE[url] = {"time": time.time()}
-                print("[FETCH FAILED]", url, e)
+                print("[FETCH FAILED]", url[:80], e)
                 self.safe_send_bytes(502, b"Image fetch failed")
                 return
         self.safe_send_bytes(404, b"Not found")
