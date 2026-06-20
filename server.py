@@ -23,9 +23,6 @@ RSS_FEEDS = [
     # BBC: backup only, capped low.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
-
-    # Der Spiegel — backup.
-    "https://www.spiegel.de/international/index.rss",
 ]
 
 SOURCE_PAGES = [
@@ -91,6 +88,10 @@ GUARDIAN_API_SECTIONS = [
 GUARDIAN_API_SLOW_SECTIONS = {"environment", "science", "society", "technology", "business"}
 
 
+GUARDIAN_PRIORITY_SECTIONS = {"world", "us-news", "politics"}
+GUARDIAN_IMAGE_SECTION = {}  # url -> section, used to prioritize world/us-news/politics
+
+
 def fetch_guardian_api_images(limit=200):
     """Fetch images from Guardian open content API — structured, no scraping needed."""
     images = []
@@ -133,6 +134,7 @@ def fetch_guardian_api_images(limit=200):
                 if key and key not in seen:
                     seen.add(key)
                     images.append(cleaned)
+                    GUARDIAN_IMAGE_SECTION[cleaned] = section
                     if len(images) >= limit:
                         return images
         except Exception as e:
@@ -806,13 +808,22 @@ def source_category(url):
 
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Favor AP/Guardian images; Reuters/AlJazeera/Spiegel/BBC as solid secondary mix."""
-    buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "spiegel": [], "bbc": [], "other": []}
+    """Favor AP/Guardian images; Reuters/AlJazeera/BBC as solid secondary mix."""
+    buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "bbc": [], "other": []}
     for img in images:
         buckets.setdefault(source_category(img), []).append(img)
 
-    for bucket in buckets.values():
-        random.shuffle(bucket)
+    for name, bucket in buckets.items():
+        if name == "guardian":
+            # Keep world/us-news/politics ahead of slower-moving sections,
+            # shuffling within each priority tier so it's not always the same order.
+            priority = [img for img in bucket if GUARDIAN_IMAGE_SECTION.get(img) in GUARDIAN_PRIORITY_SECTIONS]
+            other_section = [img for img in bucket if GUARDIAN_IMAGE_SECTION.get(img) not in GUARDIAN_PRIORITY_SECTIONS]
+            random.shuffle(priority)
+            random.shuffle(other_section)
+            buckets[name] = priority + other_section
+        else:
+            random.shuffle(bucket)
 
     mixed = (
         buckets["guardian"][:350]
@@ -820,13 +831,12 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         + buckets["reuters"][:100]
         + buckets["other"][:150]
         + buckets["bbc"][:200]
-        + buckets["spiegel"][:80]
     )
 
     bbc_in_mixed = sum(1 for i in mixed if source_category(i) == "bbc")
     remaining = []
     already = set(canonical_image_key(i) for i in mixed)
-    for name in ["ap", "reuters", "guardian", "npr", "other", "spiegel"]:
+    for name in ["ap", "reuters", "guardian", "npr", "other"]:
         for img in buckets[name]:
             key = canonical_image_key(img)
             if key not in already:
@@ -1013,10 +1023,9 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     ap_imgs = [img for img in images if source_category(img) == "ap"]
     guardian_imgs = [img for img in images if source_category(img) == "guardian"]
     reuters_imgs = [img for img in images if source_category(img) == "reuters"]
-    other_imgs = [img for img in images if source_category(img) not in ("ap", "guardian", "reuters", "bbc", "spiegel")]
+    other_imgs = [img for img in images if source_category(img) not in ("ap", "guardian", "reuters", "bbc")]
     bbc_imgs = [img for img in images if source_category(img) == "bbc"]
-    spiegel_imgs = [img for img in images if source_category(img) == "spiegel"]
-    ordered_by_source = guardian_imgs + ap_imgs + reuters_imgs + other_imgs + bbc_imgs + spiegel_imgs
+    ordered_by_source = guardian_imgs + ap_imgs + reuters_imgs + other_imgs + bbc_imgs
     ordered = weighted_image_mix(ordered_by_source, limit=limit)
 
     with IMAGE_CACHE["lock"]:
@@ -1669,7 +1678,6 @@ function sourceScore(src) {{
   if (src.includes('dims.apnews.com')) return 1;
   if (src.includes('bbci.co.uk')) return 1;
   if (src.includes('aljazeera')) return 2;
-  if (src.includes('spiegel.de')) return 3;
   return 2;
 }}
 function refillPool() {{
