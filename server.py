@@ -810,7 +810,8 @@ def source_category(url):
 
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Favor AP/Guardian images; Reuters/AlJazeera/BBC as solid secondary mix."""
+    """Mix AP/Guardian/Reuters/AlJazeera/BBC together, interleaved rather than
+    stacked, so no single source dominates the front of the pool."""
     buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "bbc": [], "other": []}
     for img in images:
         buckets.setdefault(source_category(img), []).append(img)
@@ -827,34 +828,39 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         else:
             random.shuffle(bucket)
 
-    mixed = (
-        buckets["guardian"][:350]
-        + buckets["ap"][:250]
-        + buckets["reuters"][:100]
-        + buckets["other"][:150]
-        + buckets["bbc"][:200]
-    )
+    # Cap each source's contribution, same budgets as before.
+    capped = {
+        "guardian": buckets["guardian"][:350],
+        "ap": buckets["ap"][:250],
+        "reuters": buckets["reuters"][:100],
+        "other": buckets["other"][:150],
+        "bbc": buckets["bbc"][:220],
+        "npr": buckets["npr"][:0],
+    }
 
-    bbc_in_mixed = sum(1 for i in mixed if source_category(i) == "bbc")
+    # Interleave round-robin across sources so the front of the pool is a mix,
+    # not one source's block followed by another's.
+    order = ["ap", "bbc", "guardian", "reuters", "other"]
+    queues = {name: list(capped[name]) for name in order}
+    mixed = []
+    already = set()
+    while any(queues[name] for name in order):
+        for name in order:
+            if queues[name]:
+                img = queues[name].pop(0)
+                key = canonical_image_key(img)
+                if key not in already:
+                    already.add(key)
+                    mixed.append(img)
+
+    # Append anything left over (beyond the per-source caps) at the end.
     remaining = []
-    already = set(canonical_image_key(i) for i in mixed)
-    for name in ["ap", "reuters", "guardian", "npr", "other"]:
+    for name in ["ap", "reuters", "guardian", "npr", "other", "bbc"]:
         for img in buckets[name]:
             key = canonical_image_key(img)
             if key not in already:
                 already.add(key)
                 remaining.append(img)
-    # Add more BBC, hard-capped at 220 total across both passes.
-    bbc_remaining_budget = max(0, 220 - bbc_in_mixed)
-    bbc_added = 0
-    for img in buckets["bbc"]:
-        if bbc_added >= bbc_remaining_budget:
-            break
-        key = canonical_image_key(img)
-        if key not in already:
-            already.add(key)
-            remaining.append(img)
-            bbc_added += 1
     random.shuffle(remaining)
     mixed.extend(remaining)
     return mixed[:limit]
@@ -1506,16 +1512,11 @@ def image_has_center_divider(data):
 def render_html():
     with IMAGE_CACHE["lock"]:
         cached = IMAGE_CACHE["images"][:]
-    # Seed with Guardian images first — include approved and pending (not rejected).
+    # Seed with the front of the already-relevance-ordered pool, regardless of
+    # source, so the very first thing the user sees on page load feels current.
     seed = [img for img in cached
-            if "guim.co.uk" in img
-            and not url_is_known_bad(img)
+            if not url_is_known_bad(img)
             and img not in REJECT_CACHE][:10]
-    if len(seed) < 5:
-        seed += [img for img in cached
-                 if "bbci.co.uk" in img
-                 and not url_is_known_bad(img)
-                 and img not in REJECT_CACHE][:10 - len(seed)]
     sequence = []
     for img in seed:
         src = "/proxy?url=" + urllib.parse.quote(img, safe="")
@@ -1705,12 +1706,9 @@ function refillPool() {{
     fresh = candidates;
   }}
 
-  // Guardian preserves server order (newest first). Others shuffled within group.
-  const groups = [0, 1, 2, 3].map(score => {{
-    const group = fresh.filter(src => sourceScore(src) === score);
-    return score === 0 ? group : shuffleArray(group);
-  }});
-  shuffledPool = groups.flat();
+  // Server already interleaves sources and orders by relevance — just shuffle
+  // the whole fresh set rather than re-segregating by source.
+  shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
 }}
 function getNextRandomSrc() {{
