@@ -287,6 +287,12 @@ def upgrade_bbc_image_url(url):
     url = url.replace("/1024/", "/2048/")
     url = re.sub(r"/ic/\d+x\d+/", "/ic/2048x1152/", url)
     url = re.sub(r"/standard/\d+/", "/standard/2048/", url)
+    # AP's dims.apnews.com proxy embeds a target resolution in a /resize/WxH!/
+    # or /resize/WxH/ segment — upgrade it to a much larger size. Cap at a
+    # reasonable width so the CDN doesn't choke on an oversized request.
+    if "dims.apnews.com" in url:
+        url = re.sub(r'/resize/\d+x\d+!/', '/resize/1600x1067!/', url)
+        url = re.sub(r'/resize/\d+x\d+/', '/resize/1600x1067/', url)
     return url
 
 
