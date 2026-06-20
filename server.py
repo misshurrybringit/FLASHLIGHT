@@ -90,7 +90,8 @@ GUARDIAN_API_SLOW_SECTIONS = {"society", "business", "cities"}
 
 
 GUARDIAN_PRIORITY_SECTIONS = {"world", "us-news", "politics", "global-development", "law"}
-GUARDIAN_IMAGE_SECTION = {}  # url -> section, used to prioritize world/us-news/politics
+GUARDIAN_IMAGE_SECTION = {}  # url -> section
+GUARDIAN_IMAGE_DATE = {}  # url -> webPublicationDate (ISO string), for true newest-first ordering
 
 
 def fetch_guardian_api_images(limit=200):
@@ -115,6 +116,7 @@ def fetch_guardian_api_images(limit=200):
                 img_url = fields.get("main", "")
                 if not img_url:
                     continue
+                pub_date = item.get("webPublicationDate", "")
                 # Guardian main field returns HTML — extract the src URL.
                 src_match = re.search(r'src="([^"]+)"', img_url)
                 if src_match:
@@ -136,6 +138,8 @@ def fetch_guardian_api_images(limit=200):
                     seen.add(key)
                     images.append(cleaned)
                     GUARDIAN_IMAGE_SECTION[cleaned] = section
+                    if pub_date:
+                        GUARDIAN_IMAGE_DATE[cleaned] = pub_date
                     if len(images) >= limit:
                         return images
         except Exception as e:
@@ -248,6 +252,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "b3962d03da5e05ce790c02cf6de8f24dc3b59578",
     "40cca0401fe2c7d427bb3fbb79f43c0007165eb3",
     "c5f90dd0-6bcc-11f1-8e1d-bbbb1017d210",
+    "ad8daf8b33ef8da2bcac89b8d0a5d6ab64e2f3ed",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -443,7 +448,7 @@ def extract_inline_images_from_html(html, base_url, max_images=35):
             if key in seen:
                 continue
             lower = img.lower()
-            if not any(token in lower for token in ["ichef.bbci", "cloudfront", "reuters", "guardian"]):
+            if not any(token in lower for token in ["ichef.bbci", "cloudfront", "reuters", "guardian", "aljazeera", "apnews"]):
                 continue
             seen.add(key)
             imgs.append(img)
@@ -579,8 +584,8 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "cloudfront-us-east-2.images.arcpublishing.com",
             "media.guim.co.uk",
             "i.guim.co.uk",
-            "img.aljazeera.net",
-            "www.aljazeera.com/wp-content",
+            "aljazeera.net",
+            "aljazeera.com",
             ".jpg",
             ".jpeg",
             ".webp",
@@ -811,38 +816,26 @@ def source_category(url):
 
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Mix AP/Guardian/Reuters/AlJazeera/BBC together, interleaved rather than
-    stacked, so no single source dominates the front of the pool."""
+    """Interleave all sources newest-first, one at a time, no per-source caps.
+
+    Guardian images are sorted by their actual webPublicationDate. Other
+    sources don't expose a real timestamp through scraping/RSS, so their
+    natural feed order (which is newest-first by convention) is preserved.
+    """
     buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "bbc": [], "other": []}
     for img in images:
         buckets.setdefault(source_category(img), []).append(img)
 
-    for name, bucket in buckets.items():
-        if name == "guardian":
-            # Keep world/us-news/politics ahead of slower-moving sections,
-            # shuffling within each priority tier so it's not always the same order.
-            priority = [img for img in bucket if GUARDIAN_IMAGE_SECTION.get(img) in GUARDIAN_PRIORITY_SECTIONS]
-            other_section = [img for img in bucket if GUARDIAN_IMAGE_SECTION.get(img) not in GUARDIAN_PRIORITY_SECTIONS]
-            random.shuffle(priority)
-            random.shuffle(other_section)
-            buckets[name] = priority + other_section
-        else:
-            random.shuffle(bucket)
+    # Guardian: sort by actual publish date, newest first. Images without a
+    # known date (e.g. picked up via scraping, not the API) sort to the end.
+    def guardian_sort_key(img):
+        return GUARDIAN_IMAGE_DATE.get(img, "")
+    buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key, reverse=True)
 
-    # Cap each source's contribution, same budgets as before.
-    capped = {
-        "guardian": buckets["guardian"][:350],
-        "ap": buckets["ap"][:250],
-        "reuters": buckets["reuters"][:100],
-        "other": buckets["other"][:150],
-        "bbc": buckets["bbc"][:220],
-        "npr": buckets["npr"][:0],
-    }
+    # Other sources: keep their existing feed/scrape order (already newest-first).
 
-    # Interleave round-robin across sources so the front of the pool is a mix,
-    # not one source's block followed by another's.
-    order = ["ap", "bbc", "guardian", "reuters", "other"]
-    queues = {name: list(capped[name]) for name in order}
+    order = ["ap", "bbc", "guardian", "reuters", "other", "npr"]
+    queues = {name: list(buckets[name]) for name in order}
     mixed = []
     already = set()
     while any(queues[name] for name in order):
@@ -853,17 +846,6 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
                 if key not in already:
                     already.add(key)
                     mixed.append(img)
-
-    # Append anything left over (beyond the per-source caps) at the end.
-    remaining = []
-    for name in ["ap", "reuters", "guardian", "npr", "other", "bbc"]:
-        for img in buckets[name]:
-            key = canonical_image_key(img)
-            if key not in already:
-                already.add(key)
-                remaining.append(img)
-    random.shuffle(remaining)
-    mixed.extend(remaining)
     return mixed[:limit]
 
 
@@ -1159,7 +1141,11 @@ def _pre_vet_one(url):
                 REJECT_CACHE[url] = {"time": time.time()}
                 return
             APPROVED_VERTICAL_URLS.add(url)
-        if image_is_portrait_or_generic_isolated_subject(data, allow_vertical=(ih > iw * 1.4)):
+        # The isolated-subject/portrait check is tuned for Guardian's stock-photo
+        # patterns and was rejecting too many legitimate BBC news photos — skip
+        # it for BBC and rely on the graphic-page and center-divider checks,
+        # which catch the actual complaints (logos, infographics, split images).
+        if not is_bbc and image_is_portrait_or_generic_isolated_subject(data, allow_vertical=(ih > iw * 1.4)):
             REJECT_CACHE[url] = {"time": time.time()}
             return
         if image_is_probably_full_graphic_page(data):
