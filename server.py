@@ -1078,6 +1078,10 @@ def _background_pool_refresher():
             if refresh_count % 10 == 0:
                 APPROVED_URLS.clear()
                 print("[BG] Cleared approved URLs for fresh vet", flush=True)
+            # Clear REJECT_CACHE before rebuilding the pool so a stale rejection
+            # from a previous cycle doesn't block an image from being collected
+            # this cycle (it would otherwise sit unused until the cache aged out).
+            REJECT_CACHE.clear()
             refresh_count += 1
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
             print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s", flush=True)
@@ -1475,25 +1479,25 @@ def image_has_center_divider(data):
     baseline = float(np.median(col_energy)) + 1e-6
     # Count how many columns have strong vertical edge energy — multiple dividers
     # show up as multiple high-energy columns across the image.
-    strong_cols = np.sum(center_energy > baseline * 1.6)
+    strong_cols = np.sum(center_energy > baseline * 2.0)
     if strong_cols >= 2:
-        strong_col_indices = np.where(center_energy > baseline * 1.6)[0]
+        strong_col_indices = np.where(center_energy > baseline * 2.0)[0]
         for ci in strong_col_indices:
             abs_ci = center_min + ci
             col_slice = edge_strength[:, max(0, abs_ci - 1):min(w, abs_ci + 2)]
             row_strength = col_slice.mean(axis=1)
             row_baseline = float(np.median(row_strength)) + 1e-6
-            strong_frac = float(np.mean(row_strength > row_baseline * 1.3))
-            if strong_frac > 0.28:
+            strong_frac = float(np.mean(row_strength > row_baseline * 1.45))
+            if strong_frac > 0.35:
                 return True
     divider_x = center_min + int(np.argmax(center_energy))
     peak_energy = float(col_energy[divider_x])
-    if peak_energy < baseline * 1.6:
+    if peak_energy < baseline * 2.0:
         return False
     col_slice = edge_strength[:, max(0, divider_x - 1):min(w, divider_x + 2)]
     row_strength = col_slice.mean(axis=1)
     row_baseline = float(np.median(row_strength)) + 1e-6
-    strong_frac = float(np.mean(row_strength > row_baseline * 1.3))
+    strong_frac = float(np.mean(row_strength > row_baseline * 1.45))
     return strong_frac > 0.32
 
 
