@@ -81,14 +81,14 @@ GUARDIAN_API_ENABLED = True
 GUARDIAN_API_KEY = "92e99e1d-f706-45be-b06a-35af28e94141"
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics",
-    "global-development", "immigration", "science",
-    "environment", "society", "technology", "business",
+    "global-development", "society", "technology",
+    "business", "law", "media", "cities",
 ]
 # Sections that trend toward archival/stock imagery — fetch fewer pages from these.
-GUARDIAN_API_SLOW_SECTIONS = {"environment", "science", "society", "technology", "business"}
+GUARDIAN_API_SLOW_SECTIONS = {"society", "technology", "business", "media", "cities"}
 
 
-GUARDIAN_PRIORITY_SECTIONS = {"world", "us-news", "politics"}
+GUARDIAN_PRIORITY_SECTIONS = {"world", "us-news", "politics", "global-development", "law"}
 GUARDIAN_IMAGE_SECTION = {}  # url -> section, used to prioritize world/us-news/politics
 
 
