@@ -17,15 +17,39 @@ import numpy as np
 PORT = int(os.environ.get("PORT", 8000))
 
 RSS_FEEDS = [
+    # Al Jazeera — article links scraped for og:image URLs.
+    "https://www.aljazeera.com/xml/rss/all.xml",
+
+    # BBC: backup only, capped low.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
+
+    # Der Spiegel — backup.
+    "https://www.spiegel.de/international/index.rss",
 ]
 
 SOURCE_PAGES = [
+    "https://apnews.com/world-news",
+    "https://apnews.com/us-news",
+    "https://apnews.com/politics",
+    "https://apnews.com/hub/world-news",
+    "https://apnews.com/hub/ap-top-news",
+    "https://apnews.com/hub/politics",
+    "https://apnews.com/hub/middle-east",
+    "https://apnews.com/hub/europe",
+    "https://apnews.com/hub/africa",
+    "https://apnews.com/hub/latin-america",
+    "https://apnews.com/hub/asia-pacific",
+    "https://www.reuters.com/world/",
+    "https://www.reuters.com/world/us/",
+    "https://www.reuters.com/world/europe/",
+    "https://www.reuters.com/world/asia-pacific/",
+    "https://www.reuters.com/world/middle-east/",
+    "https://www.reuters.com/world/africa/",
+    "https://www.reuters.com/pictures/",
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
-    "https://www.theguardian.com/politics",
-    "https://www.theguardian.com/global-development",
+    "https://www.aljazeera.com/news/",
 ]
 
 
@@ -216,6 +240,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "03c3e400-6b19-11f1-be36-65d2d6d55e70",
     "356ab330-6baf-11f1-b1db-af71d47507d6",
     "e4af7040-6bed-11f1-b1db-af71d47507d6",
+    "b18388cd352963f68433649ecac15555847868a5",
+    "348c2a8b427d556c9e9e53ab40fe2b292e305b6d",
+    "b3962d03da5e05ce790c02cf6de8f24dc3b59578",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -779,14 +806,45 @@ def source_category(url):
 
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Guardian newest-first; BBC as backup at end."""
-    guardian_imgs = [img for img in images if source_category(img) == "guardian"]
-    bbc_imgs = [img for img in images if source_category(img) == "bbc"]
-    other_imgs = [img for img in images if source_category(img) not in ("guardian", "bbc")]
-    random.shuffle(bbc_imgs)
-    random.shuffle(other_imgs)
-    # Guardian keeps its API order (newest first). BBC and other shuffled at end.
-    mixed = guardian_imgs[:700] + other_imgs[:80] + bbc_imgs[:60]
+    """Favor AP/Guardian images; Reuters/AlJazeera/Spiegel/BBC as solid secondary mix."""
+    buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "spiegel": [], "bbc": [], "other": []}
+    for img in images:
+        buckets.setdefault(source_category(img), []).append(img)
+
+    for bucket in buckets.values():
+        random.shuffle(bucket)
+
+    mixed = (
+        buckets["guardian"][:350]
+        + buckets["ap"][:250]
+        + buckets["reuters"][:100]
+        + buckets["other"][:150]
+        + buckets["bbc"][:200]
+        + buckets["spiegel"][:80]
+    )
+
+    bbc_in_mixed = sum(1 for i in mixed if source_category(i) == "bbc")
+    remaining = []
+    already = set(canonical_image_key(i) for i in mixed)
+    for name in ["ap", "reuters", "guardian", "npr", "other", "spiegel"]:
+        for img in buckets[name]:
+            key = canonical_image_key(img)
+            if key not in already:
+                already.add(key)
+                remaining.append(img)
+    # Add more BBC, hard-capped at 220 total across both passes.
+    bbc_remaining_budget = max(0, 220 - bbc_in_mixed)
+    bbc_added = 0
+    for img in buckets["bbc"]:
+        if bbc_added >= bbc_remaining_budget:
+            break
+        key = canonical_image_key(img)
+        if key not in already:
+            already.add(key)
+            remaining.append(img)
+            bbc_added += 1
+    random.shuffle(remaining)
+    mixed.extend(remaining)
     return mixed[:limit]
 
 
@@ -803,7 +861,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     non_bbc_article_scrape_budget = 60
     bbc_added = 0
     page_article_scrape_budget = 50
-    max_bbc_images = int(limit * 0.15)
+    max_bbc_images = int(limit * 0.30)
 
     _add_image_stats = {"total": 0, "clean_fail": 0, "bad": 0, "dup": 0, "reject_cache": 0, "added": 0}
 
@@ -951,11 +1009,15 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             except Exception:
                 pass
 
-    # Guardian preserves API order (newest first). BBC shuffled at end.
+    # Sort each source by feed order (newest first), then interleave with weighted mix.
+    ap_imgs = [img for img in images if source_category(img) == "ap"]
     guardian_imgs = [img for img in images if source_category(img) == "guardian"]
-    other_imgs = [img for img in images if source_category(img) not in ("guardian", "bbc")]
+    reuters_imgs = [img for img in images if source_category(img) == "reuters"]
+    other_imgs = [img for img in images if source_category(img) not in ("ap", "guardian", "reuters", "bbc", "spiegel")]
     bbc_imgs = [img for img in images if source_category(img) == "bbc"]
-    ordered = guardian_imgs + other_imgs + bbc_imgs
+    spiegel_imgs = [img for img in images if source_category(img) == "spiegel"]
+    ordered_by_source = guardian_imgs + ap_imgs + reuters_imgs + other_imgs + bbc_imgs + spiegel_imgs
+    ordered = weighted_image_mix(ordered_by_source, limit=limit)
 
     with IMAGE_CACHE["lock"]:
         IMAGE_CACHE["time"] = now
@@ -1604,7 +1666,10 @@ const badSrcs = new Set();
 const _shownThisCycle = new Set();
 function sourceScore(src) {{
   if (src.includes('guim.co.uk')) return 0;
+  if (src.includes('dims.apnews.com')) return 1;
   if (src.includes('bbci.co.uk')) return 1;
+  if (src.includes('aljazeera')) return 2;
+  if (src.includes('spiegel.de')) return 3;
   return 2;
 }}
 function refillPool() {{
