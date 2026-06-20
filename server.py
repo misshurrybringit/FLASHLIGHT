@@ -59,10 +59,12 @@ APPROVED_URLS = set()
 GUARDIAN_API_ENABLED = True
 GUARDIAN_API_KEY = "92e99e1d-f706-45be-b06a-35af28e94141"
 GUARDIAN_API_SECTIONS = [
-    "world", "us-news", "politics", "environment",
+    "world", "us-news", "politics",
     "global-development", "immigration", "science",
-    "society", "technology", "business",
+    "environment", "society", "technology", "business",
 ]
+# Sections that trend toward archival/stock imagery — fetch fewer pages from these.
+GUARDIAN_API_SLOW_SECTIONS = {"environment", "science", "society", "technology", "business"}
 
 
 def fetch_guardian_api_images(limit=200):
@@ -73,9 +75,10 @@ def fetch_guardian_api_images(limit=200):
         if len(images) >= limit:
             break
         try:
+            page_size = 25 if section in GUARDIAN_API_SLOW_SECTIONS else 50
             url = (
                 f"https://content.guardianapis.com/search"
-                f"?section={section}&show-fields=main&page-size=50"
+                f"?section={section}&show-fields=main&page-size={page_size}"
                 f"&order-by=newest&api-key={GUARDIAN_API_KEY}"
             )
             data = fetch_text(url, timeout=3)
@@ -211,6 +214,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "321b5880-4a2e-11f1-91d3-69962f9a0625",
     "d91d9250-6b22-11f1-b1db-af71d47507d6",
     "03c3e400-6b19-11f1-be36-65d2d6d55e70",
+    "356ab330-6baf-11f1-b1db-af71d47507d6",
+    "e4af7040-6bed-11f1-b1db-af71d47507d6",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1130,6 +1135,42 @@ def image_is_probably_full_graphic_page(data):
     return False
 
 
+def measure_bbc_branding_height(img):
+    """Find the actual pixel height of the BBC branding bar by scanning rows
+    from the top and finding where the blue/green/white branding band ends."""
+    try:
+        h, w = img.shape[:2]
+        scan_h = max(1, int(h * 0.42))
+        top = img[:scan_h, :]
+        hsv = cv2.cvtColor(top, cv2.COLOR_BGR2HSV)
+        gray = cv2.cvtColor(top, cv2.COLOR_BGR2GRAY)
+        blue_mask = (hsv[:, :, 0] > 98) & (hsv[:, :, 0] < 138) & (hsv[:, :, 1] > 70) & (hsv[:, :, 2] > 40)
+        green_mask = (hsv[:, :, 0] > 42) & (hsv[:, :, 0] < 92) & (hsv[:, :, 1] > 75) & (hsv[:, :, 2] > 50)
+        white_mask = gray > 210
+        branding_mask = blue_mask | green_mask | white_mask
+        row_frac = np.mean(branding_mask, axis=1)
+        # Walk down from the top; the branding bar is a contiguous band of
+        # high branding-color rows. Stop at the first row that drops below
+        # threshold for several consecutive rows (real photo content starts).
+        threshold = 0.35
+        consecutive_low = 0
+        last_branding_row = 0
+        for i, frac in enumerate(row_frac):
+            if frac >= threshold:
+                last_branding_row = i
+                consecutive_low = 0
+            else:
+                consecutive_low += 1
+                if consecutive_low >= 6:
+                    break
+        # Add a small margin below the detected bar, but cap how much we
+        # ever crop so we don't eat into faces lower in the frame.
+        crop_px = min(last_branding_row + 8, int(h * 0.16))
+        return max(0, crop_px)
+    except Exception:
+        return 0
+
+
 def top_has_bbc_branding(img):
     if img is None or img.size == 0:
         return False
@@ -1168,7 +1209,10 @@ def crop_top_if_needed(img, url=""):
             return (cropped, True) if cropped is not None and cropped.size > 0 else (img, False)
         if not top_has_bbc_branding(img):
             return img, False
-        cropped = img[int(h * 0.18):, :]
+        crop_px = measure_bbc_branding_height(img)
+        if crop_px <= 0:
+            return img, False
+        cropped = img[crop_px:, :]
         return (cropped, True) if cropped is not None and cropped.size > 0 else (img, False)
     except Exception:
         return img, False
@@ -1360,25 +1404,25 @@ def image_has_center_divider(data):
     baseline = float(np.median(col_energy)) + 1e-6
     # Count how many columns have strong vertical edge energy — multiple dividers
     # show up as multiple high-energy columns across the image.
-    strong_cols = np.sum(center_energy > baseline * 1.8)
+    strong_cols = np.sum(center_energy > baseline * 1.6)
     if strong_cols >= 2:
-        strong_col_indices = np.where(center_energy > baseline * 1.8)[0]
+        strong_col_indices = np.where(center_energy > baseline * 1.6)[0]
         for ci in strong_col_indices:
             abs_ci = center_min + ci
             col_slice = edge_strength[:, max(0, abs_ci - 1):min(w, abs_ci + 2)]
             row_strength = col_slice.mean(axis=1)
             row_baseline = float(np.median(row_strength)) + 1e-6
-            strong_frac = float(np.mean(row_strength > row_baseline * 1.4))
-            if strong_frac > 0.32:
+            strong_frac = float(np.mean(row_strength > row_baseline * 1.3))
+            if strong_frac > 0.28:
                 return True
     divider_x = center_min + int(np.argmax(center_energy))
     peak_energy = float(col_energy[divider_x])
-    if peak_energy < baseline * 1.8:
+    if peak_energy < baseline * 1.6:
         return False
     col_slice = edge_strength[:, max(0, divider_x - 1):min(w, divider_x + 2)]
     row_strength = col_slice.mean(axis=1)
     row_baseline = float(np.median(row_strength)) + 1e-6
-    strong_frac = float(np.mean(row_strength > row_baseline * 1.4))
+    strong_frac = float(np.mean(row_strength > row_baseline * 1.3))
     return strong_frac > 0.32
 
 
