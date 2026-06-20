@@ -287,12 +287,9 @@ def upgrade_bbc_image_url(url):
     url = url.replace("/1024/", "/2048/")
     url = re.sub(r"/ic/\d+x\d+/", "/ic/2048x1152/", url)
     url = re.sub(r"/standard/\d+/", "/standard/2048/", url)
-    # AP's dims.apnews.com proxy embeds a target resolution in a /resize/WxH!/
-    # or /resize/WxH/ segment — upgrade it to a much larger size. Cap at a
-    # reasonable width so the CDN doesn't choke on an oversized request.
-    if "dims.apnews.com" in url:
-        url = re.sub(r'/resize/\d+x\d+!/', '/resize/1600x1067!/', url)
-        url = re.sub(r'/resize/\d+x\d+/', '/resize/1600x1067/', url)
+    # NOTE: do not rewrite dims.apnews.com resize dimensions — AP's CDN
+    # rejects mismatched aspect ratios (400 Bad Request) and forcing a fixed
+    # size increases load, worsening 429 rate limiting. Leave AP URLs as-is.
     return url
 
 
@@ -822,21 +819,25 @@ def source_category(url):
 
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Interleave all sources newest-first, one at a time, no per-source caps.
+    """Interleave all sources, one at a time, no per-source caps.
 
-    Guardian images are sorted by their actual webPublicationDate. Other
-    sources don't expose a real timestamp through scraping/RSS, so their
-    natural feed order (which is newest-first by convention) is preserved.
+    Guardian images are ordered by section priority — world/us-news/politics
+    first, then global-development/law, then everything else — regardless of
+    recency. Other sources keep their existing feed/scrape order.
     """
     buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "bbc": [], "other": []}
     for img in images:
         buckets.setdefault(source_category(img), []).append(img)
 
-    # Guardian: sort by actual publish date, newest first. Images without a
-    # known date (e.g. picked up via scraping, not the API) sort to the end.
+    # Guardian: sort strictly by section priority tier, not by date.
+    section_rank = {
+        "world": 0, "us-news": 0, "politics": 0,
+        "global-development": 1, "law": 1,
+        "society": 2, "business": 2, "cities": 2,
+    }
     def guardian_sort_key(img):
-        return GUARDIAN_IMAGE_DATE.get(img, "")
-    buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key, reverse=True)
+        return section_rank.get(GUARDIAN_IMAGE_SECTION.get(img, ""), 3)
+    buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
 
     # Other sources: keep their existing feed/scrape order (already newest-first).
 
@@ -1111,6 +1112,29 @@ def _pre_cache_seed(images):
         except Exception as e:
             print(f"[SEED] fetch failed: {e}", flush=True)
     print(f"[BG] Seed pre-cached: {cached_count}/{len(seed)} succeeded.", flush=True)
+
+    # AP's CDN rate-limits aggressively (429s) when many images are fetched
+    # in a short window — this happens when many users load the page at once,
+    # since every AP image is fetched live with no pre-warmed cache. Slowly
+    # pre-cache a batch of AP images here, one at a time with a short delay,
+    # so more of them are already cached by the time users request them.
+    ap_seed = [img for img in images
+               if "dims.apnews.com" in img
+               and img not in PROXY_CACHE
+               and not url_is_known_bad(img)][:15]
+    ap_cached = 0
+    for url in ap_seed:
+        try:
+            data, content_type = fetch_bytes(url, timeout=8)
+            if content_type.startswith("image/") and len(data) > 10000:
+                PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
+                APPROVED_URLS.add(url)
+                ap_cached += 1
+        except Exception:
+            pass
+        time.sleep(2.0)  # spread requests out to avoid tripping AP's rate limiter
+    if ap_seed:
+        print(f"[BG] AP pre-cached: {ap_cached}/{len(ap_seed)} succeeded.", flush=True)
 
 
 def _pre_vet_one(url):
