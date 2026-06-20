@@ -76,16 +76,17 @@ REJECT_CACHE_SECONDS = 300  # 5 minutes — retry failed images sooner
 
 # URLs that passed cv2 checks during pool build — skip checks at serve time.
 APPROVED_URLS = set()
+APPROVED_VERTICAL_URLS = set()  # subset of APPROVED_URLS that are vertical-friendly (mobile only)
 
 GUARDIAN_API_ENABLED = True
 GUARDIAN_API_KEY = "92e99e1d-f706-45be-b06a-35af28e94141"
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics",
     "global-development", "society",
-    "business", "law", "media", "cities",
+    "business", "law", "cities",
 ]
 # Sections that trend toward archival/stock imagery — fetch fewer pages from these.
-GUARDIAN_API_SLOW_SECTIONS = {"society", "business", "media", "cities"}
+GUARDIAN_API_SLOW_SECTIONS = {"society", "business", "cities"}
 
 
 GUARDIAN_PRIORITY_SECTIONS = {"world", "us-news", "politics", "global-development", "law"}
@@ -1085,6 +1086,7 @@ def _background_pool_refresher():
             t0 = time.time()
             if refresh_count % 10 == 0:
                 APPROVED_URLS.clear()
+                APPROVED_VERTICAL_URLS.clear()
                 print("[BG] Cleared approved URLs for fresh vet", flush=True)
             # Clear REJECT_CACHE before rebuilding the pool so a stale rejection
             # from a previous cycle doesn't block an image from being collected
@@ -1151,9 +1153,13 @@ def _pre_vet_one(url):
             REJECT_CACHE[url] = {"time": time.time()}
             return
         if ih > iw * 1.4:
-            REJECT_CACHE[url] = {"time": time.time()}
-            return
-        if image_is_portrait_or_generic_isolated_subject(data):
+            # Moderate verticals (up to ~2.2:1) are kept for mobile use instead
+            # of being discarded — extreme/banner-like crops are still rejected.
+            if ih > iw * 2.2 or iw < min_w * 0.5:
+                REJECT_CACHE[url] = {"time": time.time()}
+                return
+            APPROVED_VERTICAL_URLS.add(url)
+        if image_is_portrait_or_generic_isolated_subject(data, allow_vertical=(ih > iw * 1.4)):
             REJECT_CACHE[url] = {"time": time.time()}
             return
         if image_is_probably_full_graphic_page(data):
@@ -1314,14 +1320,14 @@ def get_cv2_face_cascade():
         return None
 
 
-def image_is_portrait_or_generic_isolated_subject(data):
+def image_is_portrait_or_generic_isolated_subject(data, allow_vertical=False):
     """
     Reject images that read like a single cut-out/portrait rather than a news scene.
 
     This catches:
     - centered single faces / headshots
     - cropped isolated people/objects on smooth generic backgrounds
-    - vertical/cropped editorial photos that survive URL rules
+    - vertical/cropped editorial photos that survive URL rules (unless allow_vertical)
     It tries not to reject crowds, landscapes, street scenes, or busy interiors.
     """
     try:
@@ -1337,8 +1343,9 @@ def image_is_portrait_or_generic_isolated_subject(data):
     if w < 120 or h < 120:
         return False
 
-    # No verticals / phone crops in the main pool.
-    if h > w * 1.05:
+    # Verticals are normally excluded from the main pool, but moderate vertical
+    # crops (up to ~2.2:1) are kept when allow_vertical is set, for mobile use.
+    if h > w * 1.05 and not allow_vertical:
         return True
 
     # Work at a stable analysis size.
@@ -1520,7 +1527,7 @@ def render_html():
     sequence = []
     for img in seed:
         src = "/proxy?url=" + urllib.parse.quote(img, safe="")
-        sequence.append({"src": src, "raw": img, "verticalOnly": url_is_vertical_only(img)})
+        sequence.append({"src": src, "raw": img, "verticalOnly": url_is_vertical_only(img) or img in APPROVED_VERTICAL_URLS})
     sequence_json = json.dumps(sequence).replace('\n', '\\n').replace('\r', '')
     return f'''<!DOCTYPE html>
 <html>
@@ -1922,7 +1929,7 @@ class Handler(BaseHTTPRequestHandler):
             sequence = []
             for img in cached:
                 src = "/proxy?url=" + urllib.parse.quote(img, safe="")
-                sequence.append({"src": src, "raw": img, "verticalOnly": url_is_vertical_only(img)})
+                sequence.append({"src": src, "raw": img, "verticalOnly": url_is_vertical_only(img) or img in APPROVED_VERTICAL_URLS})
             data = json.dumps(sequence).encode("utf-8")
             self.safe_send_bytes(200, data, "application/json; charset=utf-8", {"Cache-Control": "no-store"})
             return
@@ -2060,9 +2067,11 @@ class Handler(BaseHTTPRequestHandler):
                             self.safe_send_bytes(415, b"Rejected low resolution image", extra_headers={"Cache-Control": "no-store"})
                             return
                         if ih > iw * 1.4:
-                            REJECT_CACHE[url] = {"time": time.time()}
-                            self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
-                            return
+                            if ih > iw * 2.2 or iw < min_w * 0.5:
+                                REJECT_CACHE[url] = {"time": time.time()}
+                                self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
+                                return
+                            APPROVED_VERTICAL_URLS.add(url)
                         cropped, did_crop = crop_top_if_needed(img, url)
                         if cropped is not None and cropped.size > 0:
                             ok, encoded = cv2.imencode(".jpg", cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
@@ -2086,6 +2095,7 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     REJECT_CACHE.clear()
     APPROVED_URLS.clear()
+    APPROVED_VERTICAL_URLS.clear()
     _load_guardian_cache_from_disk()
     print()
     print("misshurry")
