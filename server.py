@@ -81,11 +81,11 @@ GUARDIAN_API_ENABLED = True
 GUARDIAN_API_KEY = "92e99e1d-f706-45be-b06a-35af28e94141"
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics",
-    "global-development", "society", "technology",
+    "global-development", "society",
     "business", "law", "media", "cities",
 ]
 # Sections that trend toward archival/stock imagery — fetch fewer pages from these.
-GUARDIAN_API_SLOW_SECTIONS = {"society", "technology", "business", "media", "cities"}
+GUARDIAN_API_SLOW_SECTIONS = {"society", "business", "media", "cities"}
 
 
 GUARDIAN_PRIORITY_SECTIONS = {"world", "us-news", "politics", "global-development", "law"}
