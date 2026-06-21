@@ -23,32 +23,14 @@ RSS_FEEDS = [
     # BBC: backup only, capped low.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
-
-    # Der Spiegel — backup.
-    "https://www.spiegel.de/international/index.rss",
 ]
 
 SOURCE_PAGES = [
-    "https://apnews.com/world-news",
-    "https://apnews.com/us-news",
-    "https://apnews.com/politics",
-    "https://apnews.com/hub/world-news",
-    "https://apnews.com/hub/ap-top-news",
-    "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/middle-east",
-    "https://apnews.com/hub/europe",
-    "https://apnews.com/hub/africa",
-    "https://apnews.com/hub/latin-america",
-    "https://apnews.com/hub/asia-pacific",
-    "https://www.reuters.com/world/",
-    "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/world/europe/",
-    "https://www.reuters.com/world/asia-pacific/",
-    "https://www.reuters.com/world/middle-east/",
-    "https://www.reuters.com/world/africa/",
-    "https://www.reuters.com/pictures/",
+    "https://www.theguardian.com/",
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
+    "https://www.theguardian.com/politics",
+    "https://www.aljazeera.com/news/",
 ]
 
 
@@ -74,17 +56,26 @@ PROXY_CACHE_SECONDS = 600
 PROXY_CACHE_MAX_ITEMS = 200
 
 REJECT_CACHE = {}
-REJECT_CACHE_SECONDS = 1800
+REJECT_CACHE_SECONDS = 300  # 5 minutes — retry failed images sooner
 
 # URLs that passed cv2 checks during pool build — skip checks at serve time.
 APPROVED_URLS = set()
+APPROVED_VERTICAL_URLS = set()  # subset of APPROVED_URLS that are vertical-friendly (mobile only)
 
 GUARDIAN_API_ENABLED = True
-GUARDIAN_API_KEY = "55e2b57b-70cb-4542-a4b4-83971a720752"
+GUARDIAN_API_KEY = "92e99e1d-f706-45be-b06a-35af28e94141"
 GUARDIAN_API_SECTIONS = [
-    "world", "us-news", "politics", "environment",
-    "global-development", "immigration",
+    "world", "us-news", "politics",
+    "global-development", "society",
+    "business", "law", "cities",
 ]
+# Sections that trend toward archival/stock imagery — fetch fewer pages from these.
+GUARDIAN_API_SLOW_SECTIONS = {"society", "business", "cities"}
+
+
+GUARDIAN_PRIORITY_SECTIONS = {"world", "us-news", "politics", "global-development", "law"}
+GUARDIAN_IMAGE_SECTION = {}  # url -> section
+GUARDIAN_IMAGE_DATE = {}  # url -> webPublicationDate (ISO string), for true newest-first ordering
 
 
 def fetch_guardian_api_images(limit=200):
@@ -95,12 +86,13 @@ def fetch_guardian_api_images(limit=200):
         if len(images) >= limit:
             break
         try:
+            page_size = 25 if section in GUARDIAN_API_SLOW_SECTIONS else 50
             url = (
                 f"https://content.guardianapis.com/search"
-                f"?section={section}&show-fields=main&page-size=50"
-                f"&order-by=newest&api-key={GUARDIAN_API_KEY}"
+                f"?section={section}&show-fields=main&page-size={page_size}"
+                f"&type=article&order-by=newest&api-key={GUARDIAN_API_KEY}"
             )
-            data = fetch_text(url, timeout=6)
+            data = fetch_text(url, timeout=3)
             blob = json.loads(data)
             results = blob.get("response", {}).get("results", [])
             for item in results:
@@ -108,6 +100,7 @@ def fetch_guardian_api_images(limit=200):
                 img_url = fields.get("main", "")
                 if not img_url:
                     continue
+                pub_date = item.get("webPublicationDate", "")
                 # Guardian main field returns HTML — extract the src URL.
                 src_match = re.search(r'src="([^"]+)"', img_url)
                 if src_match:
@@ -128,6 +121,9 @@ def fetch_guardian_api_images(limit=200):
                 if key and key not in seen:
                     seen.add(key)
                     images.append(cleaned)
+                    GUARDIAN_IMAGE_SECTION[cleaned] = section
+                    if pub_date:
+                        GUARDIAN_IMAGE_DATE[cleaned] = pub_date
                     if len(images) >= limit:
                         return images
         except Exception as e:
@@ -140,7 +136,32 @@ def fetch_guardian_api_images(limit=200):
     return images
 
 GUARDIAN_API_CACHE = {"images": [], "time": 0}
-GUARDIAN_API_CACHE_SECONDS = 3600  # 1 hour
+GUARDIAN_API_CACHE_SECONDS = 7200  # 2 hours — free dev tier is 500-5000 req/day, far more headroom than previously assumed
+GUARDIAN_API_CACHE_FILE = "/tmp/guardian_api_cache.json"
+
+
+def _load_guardian_cache_from_disk():
+    """Load Guardian API cache from disk on startup to survive restarts."""
+    try:
+        with open(GUARDIAN_API_CACHE_FILE, "r") as f:
+            data = json.load(f)
+        age = time.time() - data.get("time", 0)
+        if age < GUARDIAN_API_CACHE_SECONDS and data.get("images"):
+            GUARDIAN_API_CACHE["images"] = data["images"]
+            GUARDIAN_API_CACHE["time"] = data["time"]
+            print(f"[Guardian API] Loaded {len(data['images'])} images from disk cache (age {int(age/3600)}h)", flush=True)
+    except Exception:
+        pass
+
+
+def _save_guardian_cache_to_disk(images, timestamp):
+    """Persist Guardian API cache to disk."""
+    try:
+        with open(GUARDIAN_API_CACHE_FILE, "w") as f:
+            json.dump({"images": images, "time": timestamp}, f)
+        print(f"[Guardian API] Saved {len(images)} images to disk cache", flush=True)
+    except Exception as e:
+        print(f"[Guardian API] Failed to save disk cache: {e}", flush=True)
 
 
 def get_guardian_api_images():
@@ -151,13 +172,15 @@ def get_guardian_api_images():
         print(f"[Guardian API] Using cache: {len(GUARDIAN_API_CACHE['images'])} images", flush=True)
         return GUARDIAN_API_CACHE["images"][:]
     print("[Guardian API] Fetching fresh images …", flush=True)
-    images = fetch_guardian_api_images(limit=400)
+    images = fetch_guardian_api_images(limit=600)
     print(f"[Guardian API] Got {len(images)} images", flush=True)
     if images:
         GUARDIAN_API_CACHE["images"] = images
         GUARDIAN_API_CACHE["time"] = now
+        _save_guardian_cache_to_disk(images, now)
     return images
-MIN_IMAGE_HEIGHT = 430
+MIN_IMAGE_WIDTH = 800
+MIN_IMAGE_HEIGHT = 540
 
 KNOWN_BAD_URL_FRAGMENTS = [
     "p0l7jnbt", "p0kxxp17", "p0n9y769", "3a08bc10", "b9785300",
@@ -199,6 +222,25 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "bf0f4d3fe009178469f4c44167b12a3e857fd72a",
     "374c252854b26a9d2508b2fcfd25097469852efb",
     "a15c3d426bf3ab77265f232394e5eccb3f7f96af",
+    "40755c81-979d-4d99-a472-2258517838b3",
+    "86cf2180-68ca-11f1-b1db-af71d47507d6",
+    "a2e8a279-839a-40d3-83f8-dc65df0dbc72",
+    "48c2f1158b35ff75cb2edcbb613c747af1215f74",
+    "321b5880-4a2e-11f1-91d3-69962f9a0625",
+    "d91d9250-6b22-11f1-b1db-af71d47507d6",
+    "03c3e400-6b19-11f1-be36-65d2d6d55e70",
+    "356ab330-6baf-11f1-b1db-af71d47507d6",
+    "e4af7040-6bed-11f1-b1db-af71d47507d6",
+    "b18388cd352963f68433649ecac15555847868a5",
+    "348c2a8b427d556c9e9e53ab40fe2b292e305b6d",
+    "b3962d03da5e05ce790c02cf6de8f24dc3b59578",
+    "40cca0401fe2c7d427bb3fbb79f43c0007165eb3",
+    "c5f90dd0-6bcc-11f1-8e1d-bbbb1017d210",
+    "ad8daf8b33ef8da2bcac89b8d0a5d6ab64e2f3ed",
+    "Post-Label-Image-Option-1-1780213226",
+    "Ahmed-Wishah-1781977869",
+    "e35ca6a4be4b3a80e6eb5c4f9e9711956b208758",
+    "image-1781976244",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -225,17 +267,32 @@ def url_needs_voice_crop(url):
 def upgrade_bbc_image_url(url):
     if not url:
         return url
-    url = url.replace("/240/", "/1024/")
-    url = url.replace("/320/", "/1024/")
-    url = url.replace("/480/", "/1024/")
-    url = url.replace("/624/", "/1024/")
-    url = url.replace("/660/", "/1024/")
-    url = re.sub(r"/ic/\d+x\d+/", "/ic/1024x576/", url)
-    url = re.sub(r"/standard/\d+/", "/standard/1024/", url)
-    # Upgrade AP dims resize to a reasonable width — don't go too large or CDN blocks.
-    if "dims.apnews.com" in url:
-        url = re.sub(r'resize/\d+x\d+!', 'resize/980x653!', url)
-        url = re.sub(r'resize/\d+x\d+/', 'resize/980x653/', url)
+    url = url.replace("/240/", "/2048/")
+    url = url.replace("/320/", "/2048/")
+    url = url.replace("/480/", "/2048/")
+    url = url.replace("/624/", "/2048/")
+    url = url.replace("/660/", "/2048/")
+    url = url.replace("/1024/", "/2048/")
+    url = re.sub(r"/ic/\d+x\d+/", "/ic/2048x1152/", url)
+    url = re.sub(r"/standard/\d+/", "/standard/2048/", url)
+    # AP's dims.apnews.com proxy has a /resize/WxH!/ segment specifying the
+    # final output size, separate from the /crop/ region. Scale it up while
+    # preserving its aspect ratio (forcing a fixed ratio caused 400 errors
+    # when it didn't match the crop). Cap the upscale so we don't trigger
+    # excessive CDN load (which was worsening 429 rate limiting).
+    def _upgrade_ap_resize(match):
+        rw, rh = int(match.group(1)), int(match.group(2))
+        if rw <= 0 or rh <= 0:
+            return match.group(0)
+        target_w = min(max(rw, 1440), 1800)
+        scale = target_w / rw
+        target_h = max(1, round(rh * scale))
+        return f"/resize/{target_w}x{target_h}!/"
+    url = re.sub(r'/resize/(\d+)x(\d+)!/', _upgrade_ap_resize, url)
+    # Al Jazeera WordPress images often cap quality=80 in the resize query
+    # param — bump it up for a sharper result.
+    if "aljazeera.com" in url:
+        url = re.sub(r'quality=\d+', 'quality=95', url)
     return url
 
 
@@ -250,8 +307,24 @@ def clean_extracted_image_url(url):
     lower = url.lower()
     if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
         return None
-    # Reject SVG files — these are almost always AP/Reuters infographics/maps.
+    # Al Jazeera's WordPress CDN serves some images from thumbnail-derived
+    # source assets (filename contains "thumb") which stay soft even when
+    # resized larger — reject these rather than show a blurry upscale.
+    if "aljazeera.com" in lower and "thumb" in lower:
+        return None
+    # Al Jazeera also serves small UI label/badge graphics (e.g. "Post-Label",
+    # "Breaking-Label") that aren't photos at all, plus tiny fit= dimensions
+    # that confirm a non-photo asset.
+    if "aljazeera.com" in lower:
+        if any(t in lower for t in ["post-label", "label-image", "badge-", "-label-"]):
+            return None
+        fit_match = re.search(r'fit=(\d+)%2c(\d+)', lower)
+        if fit_match and (int(fit_match.group(1)) < 200 or int(fit_match.group(2)) < 200):
+            return None
+    # Reject SVG and GIF files.
     if lower.endswith(".svg") or ".svg?" in lower:
+        return None
+    if lower.endswith(".gif") or ".gif?" in lower:
         return None
     # Reject sports and entertainment images by filename keywords.
     sports_entertainment_terms = [
@@ -266,29 +339,22 @@ def clean_extracted_image_url(url):
     # BBC photos are always .jpg — .png from BBC is always a graphic/illustration.
     if "bbci.co.uk" in lower and lower.endswith(".png"):
         return None
-    if "assets.apnews.com" in lower and lower.endswith(".png"):
+    if "spiegel.de" in lower and lower.endswith(".png"):
+        return None
+    # Reject NPR entirely — not a source anymore.
+    if "brightspotcdn" in lower or "media.npr.org" in lower:
         return None
     # BBC /images/ic/ URLs with programme IDs (p0...) are show/podcast assets, not news photos.
     if "bbci.co.uk/images/ic/" in lower and "/p0" in lower:
         return None
-    # AP /projects/ URLs are always graphics/interactives, never photos.
-    if "apnews.com/projects/" in lower:
-        return None
-    # Catch dims.apnews.com wrappers around .png inner assets.
-    if "dims.apnews.com" in lower:
-        inner = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("url", [""])[0]
-        if inner.lower().endswith(".png"):
-            return None
-    # Reject AP graphic asset URLs: assets.apnews.com with short filenames
-    # (real photos have long content-hash filenames; graphics like typeshift.svg are short).
-    if "assets.apnews.com" in lower and "dims.apnews.com" not in lower:
-        path_parts = urllib.parse.urlparse(url).path.strip("/").split("/")
-        fname = path_parts[-1] if path_parts else ""
-        # Real AP photo filenames are long hex hashes (30+ chars before extension).
-        # Graphic/game filenames are short words. Reject short ones.
-        stem = fname.split(".")[0]
-        if len(stem) < 20:
-            return None
+    # Guardian: reject portrait crops by checking dimensions in URL path.
+    # Format: /hash/x_y_width_height/size.jpg — reject if height > width.
+    if "media.guim.co.uk" in lower:
+        m = re.search(r'/\d+_\d+_(\d+)_(\d+)/', urllib.parse.urlparse(url).path)
+        if m:
+            crop_w, crop_h = int(m.group(1)), int(m.group(2))
+            if crop_h > crop_w:
+                return None
     return upgrade_bbc_image_url(url)
 
 
@@ -317,10 +383,7 @@ def fetch_text(url, timeout=3):
 
 def fetch_bytes(url, timeout=8):
     headers = dict(HEADERS)
-    if "apnews.com" in url:
-        headers["Referer"] = "https://apnews.com/"
-        headers["Origin"] = "https://apnews.com"
-    elif "guim.co.uk" in url or "theguardian.com" in url:
+    if "guim.co.uk" in url or "theguardian.com" in url:
         headers["Referer"] = "https://www.theguardian.com/"
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as response:
@@ -378,9 +441,6 @@ def extract_article_links_from_html(html, base_url, max_links=40):
         lower = link.lower()
         if any(skip in lower for skip in ["/video/", "/podcast", "/live", "signin", "subscribe", "login"]):
             continue
-        if any(domain in lower for domain in ["apnews.com", "reuters.com"]):
-            if len(lower.rstrip('/').split('/')) < 4:
-                continue
         seen.add(link)
         links.append(link)
         if len(links) >= max_links:
@@ -408,7 +468,7 @@ def extract_inline_images_from_html(html, base_url, max_images=35):
             if key in seen:
                 continue
             lower = img.lower()
-            if not any(token in lower for token in ["ichef.bbci", "assets.apnews", "dims.apnews", "cloudfront", "reuters", "guardian", "npr"]):
+            if not any(token in lower for token in ["ichef.bbci", "cloudfront", "reuters", "guardian", "aljazeera", "apnews"]):
                 continue
             seen.add(key)
             imgs.append(img)
@@ -540,28 +600,16 @@ def extract_image_urls_from_html(html, base_url, limit=80):
 
         if not any(good in lower for good in [
             "ichef.bbci.co.uk",
-            "dims.apnews.com",
-            "assets.apnews.com",
             "static.reuters.com",
             "cloudfront-us-east-2.images.arcpublishing.com",
             "media.guim.co.uk",
             "i.guim.co.uk",
-            "npr.brightspotcdn.com",
-            "img.aljazeera.net",
-            "www.aljazeera.com/wp-content",
-            "upload.wikimedia.org",
-            "images.spiegel.de",
-            "cdn1.spiegel.de",
+            "aljazeera.net",
+            "aljazeera.com",
             ".jpg",
             ".jpeg",
             ".webp",
         ]):
-            return False
-        # Block AP project/social graphics that sneak through on .jpg/.webp extension.
-        if "apnews.com" in lower and any(bad in lower for bad in ["/projects/", "/social/", "/interactives/"]):
-            return False
-        # media.npr.org is NPR's placeholder/logo domain — real NPR photos use brightspotcdn.
-        if "media.npr.org" in lower:
             return False
         # Guardian author avatars and small images.
         if "yimg.com" in lower and (";w=80;" in lower or ";h=60;" in lower or "logo" in lower):
@@ -577,12 +625,6 @@ def extract_image_urls_from_html(html, base_url, limit=80):
         # Guardian composite/collage images — always divided layouts.
         if "guim.co.uk" in lower and "_5000_4000" in lower:
             return False
-        # NPR brightspotcdn URLs with non-news filenames (games, puzzles, podcasts etc).
-        if "brightspotcdn" in lower and any(bad in lower for bad in [
-            "games-we-love", "podcast", "music", "puzzle", "quiz", "crossword",
-            "default-wide", "placeholder", "share-image", "shareimage",
-        ]):
-            return False
 
         key = normalize_image_url_for_dedupe(img)
         if not key or key in seen:
@@ -590,19 +632,6 @@ def extract_image_urls_from_html(html, base_url, limit=80):
         seen.add(key)
         found.append(img)
         return True
-
-    # AP/Next.js pages embed all data in __NEXT_DATA__. Parse it first since
-    # it's the most reliable source of dims.apnews.com URLs on AP pages.
-    next_data_match = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL | re.IGNORECASE)
-    if next_data_match:
-        try:
-            blob = html_unescape_js_urls(next_data_match.group(1))
-            for m in re.finditer(r'https://dims\.apnews\.com/[^"\'\s<>\\]+', blob):
-                add_raw(m.group(0).rstrip('.,;)}]"\''))
-                if len(found) >= limit:
-                    return found[:limit]
-        except Exception:
-            pass
 
     patterns = [
         r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
@@ -620,15 +649,10 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             if len(found) >= limit:
                 return found[:limit]
 
-    # AP often hides the useful photo URLs in script/JSON blobs instead of img tags.
-    # This second pass pulls those out directly.
     expanded = html_unescape_js_urls(html)
     url_patterns = [
-        r'https://dims\.apnews\.com/[^"\'\s<>]+',
-        r'https://assets\.apnews\.com/[^"\'\s<>]+',
         r'https://cloudfront-us-east-2\.images\.arcpublishing\.com/[^"\'\s<>]+',
         r'https://media\.guim\.co\.uk/[^"\'\s<>]+',
-        r'https://npr\.brightspotcdn\.com/[^"\'\s<>]+',
     ]
     for pattern in url_patterns:
         for m in re.finditer(pattern, expanded, re.IGNORECASE):
@@ -641,12 +665,10 @@ def extract_image_urls_from_html(html, base_url, limit=80):
 
 def _scrape_one_page(page_url):
     """Fetch a section page and return (section_images, article_links)."""
-    is_ap = "apnews.com" in page_url
-    timeout = 3.5 if is_ap else 2.8
     try:
-        html = fetch_text(page_url, timeout=timeout)
-        imgs = extract_image_urls_from_html(html, page_url, limit=170 if is_ap else 55)
-        links = extract_article_links_from_html(html, page_url, max_links=80 if is_ap else 22)
+        html = fetch_text(page_url, timeout=3.0)
+        imgs = extract_image_urls_from_html(html, page_url, limit=55)
+        links = extract_article_links_from_html(html, page_url, max_links=22)
         return imgs, links
     except Exception:
         return [], []
@@ -654,12 +676,11 @@ def _scrape_one_page(page_url):
 
 def _scrape_one_article(args):
     """Fetch a single article page and return its image URLs."""
-    link, is_ap = args
-    timeout = 3.0 if is_ap else 2.4
+    link, _ = args
     try:
-        html = fetch_text(link, timeout=timeout)
-        imgs = extract_image_urls_from_html(html, link, limit=12 if is_ap else 5)
-        return imgs[:6 if is_ap else 3]
+        html = fetch_text(link, timeout=2.4)
+        imgs = extract_image_urls_from_html(html, link, limit=5)
+        return imgs[:3]
     except Exception:
         return []
 
@@ -727,44 +748,6 @@ def fetch_wikimedia_news_images(limit=60):
     except Exception as e:
         print("[Wikimedia] error:", e)
     return images
-    """Fetch images from AP's content API for a given hub slug."""
-    images = []
-    try:
-        url = f"https://apnews.com/hub/{hub_slug}?contentType=hub&format=json"
-        data = fetch_text(url, timeout=5)
-        blob = json.loads(data)
-        # AP JSON structure: data.contents[].media[].imageMimeType / imageUri
-        contents = blob.get("data", {}).get("contents", [])
-        for item in contents:
-            for media in item.get("media", []):
-                uri = media.get("imageUri") or media.get("uri") or ""
-                if uri and "dims.apnews.com" in uri:
-                    cleaned = clean_extracted_image_url(uri)
-                    if cleaned and not url_is_known_bad(cleaned):
-                        images.append(cleaned)
-                        if len(images) >= limit:
-                            return images
-            # Also check leadPhoto
-            lead = item.get("leadPhoto", {})
-            uri = lead.get("imageUri") or lead.get("uri") or ""
-            if uri and "dims.apnews.com" in uri:
-                cleaned = clean_extracted_image_url(uri)
-                if cleaned and not url_is_known_bad(cleaned):
-                    images.append(cleaned)
-    except Exception:
-        pass
-    return images
-
-
-AP_HUB_SLUGS = [
-    "ap-top-news", "world-news", "us-news", "politics",
-    "middle-east", "europe", "africa", "latin-america",
-    "asia-pacific", "russia-ukraine", "israel-hamas-war",
-    "climate-and-environment", "disasters", "photos",
-    "immigration", "china", "india", "iran", "mexico",
-    "united-nations", "nato", "human-rights", "refugees",
-    "war-and-conflict", "economy", "health",
-]
 
 
 def get_direct_page_images(limit=560):
@@ -785,38 +768,29 @@ def get_direct_page_images(limit=560):
         return True
 
     pages = DIRECT_IMAGE_PAGES[:]
-    ap_pages = [p for p in pages if "apnews.com" in p]
-    other_pages = [p for p in pages if "apnews.com" not in p]
-    random.shuffle(ap_pages)
-    random.shuffle(other_pages)
-    all_pages = ap_pages + other_pages
+    random.shuffle(pages)
 
-    # Phase 1: fetch all section pages in parallel (up to 6 workers).
-    article_links = []  # list of (link, is_ap)
+    # Phase 1: fetch all section pages in parallel.
+    article_links = []
     with ThreadPoolExecutor(max_workers=6) as ex:
-        futures = {ex.submit(_scrape_one_page, p): p for p in all_pages}
+        futures = {ex.submit(_scrape_one_page, p): p for p in pages}
         for fut in as_completed(futures):
-            page_url = futures[fut]
-            is_ap = "apnews.com" in page_url
             try:
                 imgs, links = fut.result()
                 random.shuffle(imgs)
                 for img in imgs:
                     add_candidate(img)
                 for link in links:
-                    article_links.append((link, is_ap))
+                    article_links.append((link, False))
             except Exception:
                 pass
 
     if len(images) >= limit:
         return images[:limit]
 
-    # Phase 2: scrape article pages in parallel (up to 8 workers).
-    ap_links = [(l, True) for (l, a) in article_links if a][:60]
-    other_links = [(l, False) for (l, a) in article_links if not a][:20]
-    random.shuffle(ap_links)
-    random.shuffle(other_links)
-    combined = ap_links + other_links
+    # Phase 2: scrape article pages in parallel.
+    random.shuffle(article_links)
+    combined = article_links[:80]
 
     with ThreadPoolExecutor(max_workers=8) as ex:
         futures = [ex.submit(_scrape_one_article, args) for args in combined]
@@ -846,16 +820,10 @@ def is_bbc_feed_url(url):
 
 def source_category(url):
     lower = (url or "").lower()
-    if "apnews.com" in lower or "assets.apnews.com" in lower or "dims.apnews.com" in lower:
-        return "ap"
-    if "reuters" in lower:
+    if "reuters" in lower or "arcpublishing.com" in lower:
         return "reuters"
     if "guim.co.uk" in lower or "theguardian" in lower:
         return "guardian"
-    if "npr" in lower or "brightspotcdn" in lower:
-        return "npr"
-    if "spiegel.de" in lower:
-        return "spiegel"
     if "aljazeera" in lower:
         return "other"
     if "bbci.co.uk" in lower or "bbc.co.uk" in lower:
@@ -864,45 +832,46 @@ def source_category(url):
 
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Favor AP/Guardian images; Spiegel and BBC as backup."""
-    buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "spiegel": [], "bbc": [], "other": []}
+    """Interleave Guardian/BBC/Al Jazeera, one at a time, no per-source caps.
+
+    Guardian images scraped directly from theguardian.com section pages
+    reflect real editorial choices (what Guardian's own editors are actually
+    featuring right now) and are prioritized ahead of images sourced from the
+    API's raw "newest article in section" results, which don't carry any
+    signal about how prominently a story is actually being featured.
+    """
+    buckets = {"guardian": [], "bbc": [], "other": []}
     for img in images:
-        buckets.setdefault(source_category(img), []).append(img)
+        cat = source_category(img)
+        buckets.setdefault(cat if cat in buckets else "other", []).append(img)
 
-    for bucket in buckets.values():
-        random.shuffle(bucket)
+    # Guardian: scraped (editorially featured) images first, then API images
+    # sorted by section priority tier within that.
+    section_rank = {
+        "world": 0, "us-news": 0, "politics": 0,
+        "global-development": 1, "law": 1,
+        "society": 2, "business": 2, "cities": 2,
+    }
+    def guardian_sort_key(img):
+        is_from_api = img in GUARDIAN_IMAGE_SECTION
+        api_rank = section_rank.get(GUARDIAN_IMAGE_SECTION.get(img, ""), 3)
+        return (1 if is_from_api else 0, api_rank)
+    buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
 
-    mixed = (
-        buckets["guardian"][:400]
-        + buckets["ap"][:300]
-        + buckets["reuters"][:100]
-        + buckets["other"][:100]
-        + buckets["bbc"][:120]
-        + buckets["spiegel"][:80]
-    )
+    # Other sources (Al Jazeera) keep their existing feed/scrape order.
 
-    bbc_in_mixed = sum(1 for i in mixed if source_category(i) == "bbc")
-    remaining = []
-    already = set(canonical_image_key(i) for i in mixed)
-    for name in ["ap", "reuters", "guardian", "npr", "other", "spiegel"]:
-        for img in buckets[name]:
-            key = canonical_image_key(img)
-            if key not in already:
-                already.add(key)
-                remaining.append(img)
-    # Add BBC last, hard-capped at 60 total across both passes.
-    bbc_remaining_budget = max(0, 60 - bbc_in_mixed)
-    bbc_added = 0
-    for img in buckets["bbc"]:
-        if bbc_added >= bbc_remaining_budget:
-            break
-        key = canonical_image_key(img)
-        if key not in already:
-            already.add(key)
-            remaining.append(img)
-            bbc_added += 1
-    random.shuffle(remaining)
-    mixed.extend(remaining)
+    order = ["bbc", "guardian", "other"]
+    queues = {name: list(buckets[name]) for name in order}
+    mixed = []
+    already = set()
+    while any(queues[name] for name in order):
+        for name in order:
+            if queues[name]:
+                img = queues[name].pop(0)
+                key = canonical_image_key(img)
+                if key not in already:
+                    already.add(key)
+                    mixed.append(img)
     return mixed[:limit]
 
 
@@ -919,7 +888,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     non_bbc_article_scrape_budget = 60
     bbc_added = 0
     page_article_scrape_budget = 50
-    max_bbc_images = int(limit * 0.15)
+    max_bbc_images = int(limit * 0.30)
 
     _add_image_stats = {"total": 0, "clean_fail": 0, "bad": 0, "dup": 0, "reject_cache": 0, "added": 0}
 
@@ -1067,20 +1036,51 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             except Exception:
                 pass
 
-    # Sort by source then preserve feed order (newest first within each source).
-    # AP comes first since it updates most frequently.
-    ap_imgs = [img for img in images if source_category(img) == "ap"]
+    # Sort each source by feed order (newest first), then interleave with weighted mix.
     guardian_imgs = [img for img in images if source_category(img) == "guardian"]
-    other_imgs = [img for img in images if source_category(img) not in ("ap", "guardian", "bbc")]
     bbc_imgs = [img for img in images if source_category(img) == "bbc"]
-
-    # Within each source, images were added in feed order (newest first) — preserve that.
-    ordered = guardian_imgs + ap_imgs + other_imgs + bbc_imgs
+    other_imgs = [img for img in images if source_category(img) not in ("guardian", "bbc")]
+    ordered_by_source = guardian_imgs + other_imgs + bbc_imgs
+    ordered = weighted_image_mix(ordered_by_source, limit=limit)
 
     with IMAGE_CACHE["lock"]:
         IMAGE_CACHE["time"] = now
         IMAGE_CACHE["images"] = ordered[:]
     return ordered[:limit]
+
+
+def _fast_startup_seed():
+    """Quickly populate cache with BBC images so the page isn't black on first load."""
+    print("[STARTUP] Fast seeding from BBC RSS …", flush=True)
+    images = []
+    seen = set()
+    try:
+        for feed_url in ["https://feeds.bbci.co.uk/news/world/rss.xml",
+                         "https://feeds.bbci.co.uk/news/rss.xml"]:
+            try:
+                rss = fetch_text(feed_url, timeout=4.0)
+                root = ET.fromstring(rss)
+                for item in root.findall(".//item")[:30]:
+                    img = extract_rss_item_image(item)
+                    if not img:
+                        continue
+                    cleaned = clean_extracted_image_url(img)
+                    if not cleaned or url_is_known_bad(cleaned):
+                        continue
+                    key = canonical_image_key(cleaned)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    images.append(cleaned)
+            except Exception as e:
+                print(f"[STARTUP] Feed error: {e}", flush=True)
+    except Exception as e:
+        print(f"[STARTUP] Seed error: {e}", flush=True)
+    if images:
+        with IMAGE_CACHE["lock"]:
+            IMAGE_CACHE["images"] = images
+            IMAGE_CACHE["time"] = time.time() - CACHE_SECONDS + 30  # expire soon so full build replaces it
+        print(f"[STARTUP] Seeded {len(images)} BBC images for fast first load", flush=True)
 
 
 def _background_pool_refresher():
@@ -1092,7 +1092,12 @@ def _background_pool_refresher():
             t0 = time.time()
             if refresh_count % 10 == 0:
                 APPROVED_URLS.clear()
+                APPROVED_VERTICAL_URLS.clear()
                 print("[BG] Cleared approved URLs for fresh vet", flush=True)
+            # Clear REJECT_CACHE before rebuilding the pool so a stale rejection
+            # from a previous cycle doesn't block an image from being collected
+            # this cycle (it would otherwise sit unused until the cache aged out).
+            REJECT_CACHE.clear()
             refresh_count += 1
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
             print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s", flush=True)
@@ -1106,9 +1111,9 @@ def _background_pool_refresher():
 
 
 def _pre_cache_seed(images):
-    """Pre-fetch and cache the first few AP images so they serve instantly on page load."""
+    """Pre-fetch and cache the first few Guardian images so they serve instantly on page load."""
     seed = [img for img in images
-            if "dims.apnews.com" in img
+            if "guim.co.uk" in img
             and not url_is_known_bad(img)][:20]
     print(f"[BG] Pre-caching {len(seed)} seed images …", flush=True)
     cached_count = 0
@@ -1125,15 +1130,33 @@ def _pre_cache_seed(images):
             print(f"[SEED] fetch failed: {e}", flush=True)
     print(f"[BG] Seed pre-cached: {cached_count}/{len(seed)} succeeded.", flush=True)
 
+    # AP's CDN rate-limits aggressively (429s) when many images are fetched
+    # in a short window — this happens when many users load the page at once,
+    # since every AP image is fetched live with no pre-warmed cache. Slowly
+    # pre-cache a batch of AP images here, one at a time with a short delay,
+    # so more of them are already cached by the time users request them.
+    ap_seed = [img for img in images
+               if "dims.apnews.com" in img
+               and img not in PROXY_CACHE
+               and not url_is_known_bad(img)][:15]
+    ap_cached = 0
+    for url in ap_seed:
+        try:
+            data, content_type = fetch_bytes(url, timeout=8)
+            if content_type.startswith("image/") and len(data) > 10000:
+                PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
+                APPROVED_URLS.add(url)
+                ap_cached += 1
+        except Exception:
+            pass
+        time.sleep(2.0)  # spread requests out to avoid tripping AP's rate limiter
+    if ap_seed:
+        print(f"[BG] AP pre-cached: {ap_cached}/{len(ap_seed)} succeeded.", flush=True)
+
 
 def _pre_vet_one(url):
     """Fetch and check one image; add to APPROVED_URLS if it passes."""
     if url in APPROVED_URLS:
-        return
-    # AP dims — only approve if pre-cached.
-    if "dims.apnews.com" in url:
-        if url in PROXY_CACHE:
-            APPROVED_URLS.add(url)
         return
     # Non-Guardian, non-BBC sources — approve without cv2.
     is_guardian = "guim.co.uk" in url or "theguardian.com" in url
@@ -1146,46 +1169,67 @@ def _pre_vet_one(url):
         data, content_type = fetch_bytes(url, timeout=8)
         if not content_type.startswith("image/"):
             REJECT_CACHE[url] = {"time": time.time()}
+            if is_bbc:
+                print(f"[VET] BBC rejected (not image, content_type={content_type}): {url[:90]}", flush=True)
             return
         arr = np.frombuffer(data, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
             REJECT_CACHE[url] = {"time": time.time()}
+            if is_bbc:
+                print(f"[VET] BBC rejected (decode failed): {url[:90]}", flush=True)
             return
         ih, iw = img.shape[:2]
+        min_w = MIN_IMAGE_WIDTH
+        min_h = MIN_IMAGE_HEIGHT
         if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
             REJECT_CACHE[url] = {"time": time.time()}
+            if is_bbc:
+                print(f"[VET] BBC rejected (too small {iw}x{ih}): {url[:90]}", flush=True)
             return
         if ih > iw * 1.4:
+            # Moderate verticals (up to ~2.2:1) are kept for mobile use instead
+            # of being discarded — extreme/banner-like crops are still rejected.
+            if ih > iw * 2.2 or iw < min_w * 0.5:
+                REJECT_CACHE[url] = {"time": time.time()}
+                if is_bbc:
+                    print(f"[VET] BBC rejected (extreme vertical {iw}x{ih}): {url[:90]}", flush=True)
+                return
+            APPROVED_VERTICAL_URLS.add(url)
+        # The isolated-subject/portrait check is tuned for Guardian's stock-photo
+        # patterns and was rejecting too many legitimate BBC news photos — skip
+        # it for BBC and rely on the graphic-page and center-divider checks,
+        # which catch the actual complaints (logos, infographics, split images).
+        if not is_bbc and image_is_portrait_or_generic_isolated_subject(data, allow_vertical=(ih > iw * 1.4)):
             REJECT_CACHE[url] = {"time": time.time()}
             return
-        if image_is_portrait_or_generic_isolated_subject(data):
-            REJECT_CACHE[url] = {"time": time.time()}
-            return
-        if image_is_probably_full_graphic_page(data):
+        # The graphic-page check (designed to catch infographics/charts) flags
+        # large flat color regions — blue sky, water, white clothing/buildings
+        # are extremely common in real outdoor news photos and were causing
+        # heavy false-positive rejection of legitimate BBC photos. Skip it for
+        # BBC; the center-divider check below still catches composite images.
+        if not is_bbc and image_is_probably_full_graphic_page(data):
             REJECT_CACHE[url] = {"time": time.time()}
             return
         if image_has_center_divider(data):
             REJECT_CACHE[url] = {"time": time.time()}
+            if is_bbc:
+                print(f"[VET] BBC rejected (center divider): {url[:90]}", flush=True)
             return
         APPROVED_URLS.add(url)
-    except Exception:
+        if is_bbc:
+            print(f"[VET] BBC approved: {url[:90]}", flush=True)
+    except Exception as e:
+        if is_bbc:
+            print(f"[VET] BBC fetch/exception ({e}): {url[:90]}", flush=True)
         pass
 
 
 def _pre_vet_pool(images):
     """Pre-vet all images in the pool in the background using a thread pool."""
     REJECT_CACHE.clear()
-    # Auto-approve AP dims URLs immediately — but only if they can be pre-cached.
-    # If pre-cache fails (403/400), they'll stay out of APPROVED_URLS.
-    for url in images:
-        if "dims.apnews.com" in url and not url_is_known_bad(url):
-            if url in PROXY_CACHE:  # only approve if already cached
-                APPROVED_URLS.add(url)
-    print(f"[BG] Auto-approved {len(APPROVED_URLS)} pre-cached AP dims URLs", flush=True)
-    # Only vet non-AP URLs (BBC, Guardian) through cv2.
     to_vet = [u for u in images if u not in APPROVED_URLS]
-    print(f"[BG] Pre-vetting {len(to_vet)} non-AP images …", flush=True)
+    print(f"[BG] Pre-vetting {len(to_vet)} images …", flush=True)
     with ThreadPoolExecutor(max_workers=6) as ex:
         list(ex.map(_pre_vet_one, to_vet))
     print(f"[BG] Pre-vet done. Approved: {len(APPROVED_URLS)}", flush=True)
@@ -1232,6 +1276,42 @@ def image_is_probably_full_graphic_page(data):
     return False
 
 
+def measure_bbc_branding_height(img):
+    """Find the actual pixel height of the BBC branding bar by scanning rows
+    from the top and finding where the blue/green/white branding band ends."""
+    try:
+        h, w = img.shape[:2]
+        scan_h = max(1, int(h * 0.42))
+        top = img[:scan_h, :]
+        hsv = cv2.cvtColor(top, cv2.COLOR_BGR2HSV)
+        gray = cv2.cvtColor(top, cv2.COLOR_BGR2GRAY)
+        blue_mask = (hsv[:, :, 0] > 98) & (hsv[:, :, 0] < 138) & (hsv[:, :, 1] > 70) & (hsv[:, :, 2] > 40)
+        green_mask = (hsv[:, :, 0] > 42) & (hsv[:, :, 0] < 92) & (hsv[:, :, 1] > 75) & (hsv[:, :, 2] > 50)
+        white_mask = gray > 210
+        branding_mask = blue_mask | green_mask | white_mask
+        row_frac = np.mean(branding_mask, axis=1)
+        # Walk down from the top; the branding bar is a contiguous band of
+        # high branding-color rows. Stop at the first row that drops below
+        # threshold for several consecutive rows (real photo content starts).
+        threshold = 0.35
+        consecutive_low = 0
+        last_branding_row = 0
+        for i, frac in enumerate(row_frac):
+            if frac >= threshold:
+                last_branding_row = i
+                consecutive_low = 0
+            else:
+                consecutive_low += 1
+                if consecutive_low >= 6:
+                    break
+        # Add a small margin below the detected bar, but cap how much we
+        # ever crop so we don't eat into faces lower in the frame.
+        crop_px = min(last_branding_row + 8, int(h * 0.16))
+        return max(0, crop_px)
+    except Exception:
+        return 0
+
+
 def top_has_bbc_branding(img):
     if img is None or img.size == 0:
         return False
@@ -1270,7 +1350,10 @@ def crop_top_if_needed(img, url=""):
             return (cropped, True) if cropped is not None and cropped.size > 0 else (img, False)
         if not top_has_bbc_branding(img):
             return img, False
-        cropped = img[int(h * 0.18):, :]
+        crop_px = measure_bbc_branding_height(img)
+        if crop_px <= 0:
+            return img, False
+        cropped = img[crop_px:, :]
         return (cropped, True) if cropped is not None and cropped.size > 0 else (img, False)
     except Exception:
         return img, False
@@ -1289,14 +1372,14 @@ def get_cv2_face_cascade():
         return None
 
 
-def image_is_portrait_or_generic_isolated_subject(data):
+def image_is_portrait_or_generic_isolated_subject(data, allow_vertical=False):
     """
     Reject images that read like a single cut-out/portrait rather than a news scene.
 
     This catches:
     - centered single faces / headshots
     - cropped isolated people/objects on smooth generic backgrounds
-    - vertical/cropped editorial photos that survive URL rules
+    - vertical/cropped editorial photos that survive URL rules (unless allow_vertical)
     It tries not to reject crowds, landscapes, street scenes, or busy interiors.
     """
     try:
@@ -1312,8 +1395,9 @@ def image_is_portrait_or_generic_isolated_subject(data):
     if w < 120 or h < 120:
         return False
 
-    # No verticals / phone crops in the main pool.
-    if h > w * 1.05:
+    # Verticals are normally excluded from the main pool, but moderate vertical
+    # crops (up to ~2.2:1) are kept when allow_vertical is set, for mobile use.
+    if h > w * 1.05 and not allow_vertical:
         return True
 
     # Work at a stable analysis size.
@@ -1436,22 +1520,26 @@ def image_has_center_divider(data):
         img = cv2.resize(img, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
     h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    bright = gray > 218
-    dark = gray < 38
+    # Require near-pure white/black (not just "bright sky" or "dark shadow")
+    # and a much taller, more consistent run — real divider lines/borders are
+    # stark and span nearly the full height; ordinary photo content (sky,
+    # water, shadow) rarely does both at once.
+    bright = gray > 248
+    dark = gray < 8
     center_min = int(w * 0.18)
     center_max = int(w * 0.82)
     for x in range(center_min, center_max):
         bright_band = bright[:, max(0, x - 1):min(w, x + 2)]
         dark_band = dark[:, max(0, x - 1):min(w, x + 2)]
-        bright_by_row = np.mean(bright_band, axis=1) > 0.45
-        dark_by_row = np.mean(dark_band, axis=1) > 0.45
+        bright_by_row = np.mean(bright_band, axis=1) > 0.7
+        dark_by_row = np.mean(dark_band, axis=1) > 0.7
         for line_by_row in (bright_by_row, dark_by_row):
             full_height_frac = float(np.mean(line_by_row))
-            if full_height_frac > 0.58:
+            if full_height_frac > 0.88:
                 return True
-            if full_height_frac > 0.42:
+            if full_height_frac > 0.75:
                 transitions = np.diff(line_by_row.astype(np.int8))
-                if int(np.sum(transitions == 1)) <= 8:
+                if int(np.sum(transitions == 1)) <= 2:
                     return True
     grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     edge_strength = np.abs(grad_x)
@@ -1462,47 +1550,40 @@ def image_has_center_divider(data):
     baseline = float(np.median(col_energy)) + 1e-6
     # Count how many columns have strong vertical edge energy — multiple dividers
     # show up as multiple high-energy columns across the image.
-    strong_cols = np.sum(center_energy > baseline * 2.2)
+    strong_cols = np.sum(center_energy > baseline * 3.4)
     if strong_cols >= 2:
-        # Check each strong column spans most of the image height.
-        strong_col_indices = np.where(center_energy > baseline * 2.2)[0]
+        strong_col_indices = np.where(center_energy > baseline * 3.4)[0]
         for ci in strong_col_indices:
             abs_ci = center_min + ci
             col_slice = edge_strength[:, max(0, abs_ci - 1):min(w, abs_ci + 2)]
             row_strength = col_slice.mean(axis=1)
             row_baseline = float(np.median(row_strength)) + 1e-6
-            strong_frac = float(np.mean(row_strength > row_baseline * 1.55))
-            if strong_frac > 0.38:
+            strong_frac = float(np.mean(row_strength > row_baseline * 1.8))
+            if strong_frac > 0.70:
                 return True
-    # Single divider check — original logic.
     divider_x = center_min + int(np.argmax(center_energy))
     peak_energy = float(col_energy[divider_x])
-    if peak_energy < baseline * 2.2:
+    if peak_energy < baseline * 3.4:
         return False
     col_slice = edge_strength[:, max(0, divider_x - 1):min(w, divider_x + 2)]
     row_strength = col_slice.mean(axis=1)
     row_baseline = float(np.median(row_strength)) + 1e-6
-    strong_frac = float(np.mean(row_strength > row_baseline * 1.55))
-    return strong_frac > 0.38
+    strong_frac = float(np.mean(row_strength > row_baseline * 1.8))
+    return strong_frac > 0.65
 
 
 def render_html():
     with IMAGE_CACHE["lock"]:
         cached = IMAGE_CACHE["images"][:]
-    # Seed with Guardian images first — include approved and pending (not rejected).
+    # Seed with the front of the already-relevance-ordered pool, regardless of
+    # source, so the very first thing the user sees on page load feels current.
     seed = [img for img in cached
-            if "guim.co.uk" in img
-            and not url_is_known_bad(img)
+            if not url_is_known_bad(img)
             and img not in REJECT_CACHE][:10]
-    if len(seed) < 5:
-        seed += [img for img in cached
-                 if "dims.apnews.com" in img
-                 and not url_is_known_bad(img)
-                 and img not in REJECT_CACHE][:10 - len(seed)]
     sequence = []
     for img in seed:
-        proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
-        sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
+        src = "/proxy?url=" + urllib.parse.quote(img, safe="")
+        sequence.append({"src": src, "raw": img, "verticalOnly": url_is_vertical_only(img) or img in APPROVED_VERTICAL_URLS})
     sequence_json = json.dumps(sequence).replace('\n', '\\n').replace('\r', '')
     return f'''<!DOCTYPE html>
 <html>
@@ -1520,7 +1601,25 @@ def render_html():
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
-#debug-url {{ display: none; }}
+#debug-url {{
+  display: none;
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.55);
+  font: 11px/1.4 monospace;
+  text-align: center;
+  max-width: 90vw;
+  word-break: break-all;
+  cursor: pointer;
+  z-index: 9999;
+  padding: 4px 8px;
+  background: rgba(0,0,0,0.35);
+  border-radius: 4px;
+  transition: color 0.2s;
+}}
+#debug-url:hover {{ color: rgba(255,255,255,0.9); }}
 </style>
 </head>
 <body>
@@ -1539,7 +1638,7 @@ function startSlideshow() {{
   resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); preloadNext();
 
   (function tryLoad() {{
-    if (!currentImage) {{ loadRandomSlide(); setTimeout(tryLoad, 500); }}
+    if (!currentImage) {{ loadRandomSlide(); setTimeout(tryLoad, currentImage ? 1000 : 300); }}
   }})();
 
   // Consistent rotation with preloading.
@@ -1601,16 +1700,19 @@ function startSlideshow() {{
                 if (!badSrcs.has(item.src) && slideAllowedForCurrentOrientation(item)) newSrcs.push(item.src);
               }}
               if (newSrcs.length > 0) {{
-                // Insert new images right after current position so they appear soon.
                 const insertAt = Math.min(poolIndex + 1, shuffledPool.length);
                 shuffledPool.splice(insertAt, 0, ...shuffleArray(newSrcs));
               }}
               if (!currentImage) loadRandomSlide();
             }}
-            setTimeout(refresh, slides.length > 50 ? 15000 : 3000);
-          }} else {{ setTimeout(refresh, 2000); }}
-        }} else {{ setTimeout(refresh, 2000); }}
-      }} catch(e) {{ setTimeout(refresh, 2000); }}
+            // Poll fast until we have enough images, then slow down.
+            const hasEnough = slides.length > 50;
+            setTimeout(refresh, hasEnough ? 15000 : currentImage ? 3000 : 500);
+          }} else {{
+            setTimeout(refresh, currentImage ? 2000 : 500);
+          }}
+        }} else {{ setTimeout(refresh, currentImage ? 2000 : 500); }}
+      }} catch(e) {{ setTimeout(refresh, currentImage ? 2000 : 500); }}
     }}
     setTimeout(refresh, 0);
   }})();
@@ -1624,7 +1726,7 @@ let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
 let recentlyShown = [];
-const RECENT_LIMIT = 800;
+const RECENT_LIMIT = 1200;
 
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
@@ -1644,8 +1746,8 @@ const _shownThisCycle = new Set();
 function sourceScore(src) {{
   if (src.includes('guim.co.uk')) return 0;
   if (src.includes('dims.apnews.com')) return 1;
-  if (src.includes('bbci.co.uk')) return 2;
-  if (src.includes('spiegel.de')) return 3;
+  if (src.includes('bbci.co.uk')) return 1;
+  if (src.includes('aljazeera')) return 2;
   return 2;
 }}
 function refillPool() {{
@@ -1662,17 +1764,14 @@ function refillPool() {{
   candidates = [...new Set(candidates)];
 
   let fresh = candidates.filter(src => !_shownThisCycle.has(src));
-  if (fresh.length < 5) {{
+  if (fresh.length < 15) {{
     _shownThisCycle.clear();
     fresh = candidates;
   }}
 
-  // AP images first (newest stories), then shuffle Guardian/BBC within their groups.
-  const groups = [0, 1, 2, 3].map(score => {{
-    const group = fresh.filter(src => sourceScore(src) === score);
-    return score === 0 ? group : shuffleArray(group);
-  }});
-  shuffledPool = groups.flat();
+  // Server already interleaves sources and orders by relevance — just shuffle
+  // the whole fresh set rather than re-segregating by source.
+  shuffledPool = shuffleArray(fresh);
   poolIndex = 0;
 }}
 function getNextRandomSrc() {{
@@ -1752,7 +1851,7 @@ function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
   recentlyShown.push(src); if (recentlyShown.length > RECENT_LIMIT) recentlyShown.shift();
   _shownThisCycle.add(src);
-  const rawUrl = decodeURIComponent(src.replace("/proxy?url=", ""));
+  const rawUrl = src.startsWith('/proxy?url=') ? decodeURIComponent(src.replace("/proxy?url=", "")) : src;
   const usableEstimate = Math.max(0, slides.length - badSrcs.size);
   const el = document.getElementById("debug-url");
   el.textContent = rawUrl + "  [recent " + recentlyShown.length + " / usable ~" + usableEstimate + " / bad " + badSrcs.size + "]";
@@ -1776,12 +1875,15 @@ function loadRandomSlide(attempts=0) {{
   const loader = new Image();
   loader.decoding = "async";
 
-  // Safety valve — if the image neither loads nor errors within 6s, move on.
+  // Safety valve — if the image neither loads nor errors within 11s, move on.
+  // The server's own proxy fetch has an 8s timeout, so this needs headroom
+  // above that or slow-loading images (e.g. BBC on a cold cache) get
+  // blacklisted client-side before the server even finishes fetching them.
   let timeout = setTimeout(() => {{
     isLoadingSlide = false;
     badSrcs.add(src);
     loadRandomSlide(attempts + 1);
-  }}, 6000);
+  }}, 11000);
 
   // Use preloaded image if ready, otherwise fetch normally.
   const preloaded = preloadCache.get(src);
@@ -1880,14 +1982,13 @@ class Handler(BaseHTTPRequestHandler):
             # If APPROVED_URLS is empty (first boot), return everything so client isn't blank.
             if APPROVED_URLS:
                 cached = [img for img in cached
-                         if "dims.apnews.com" not in img
-                         and (img in APPROVED_URLS
+                         if (img in APPROVED_URLS
                               or (img not in REJECT_CACHE
                                   and not url_is_known_bad(img)))]
             sequence = []
             for img in cached:
-                proxied = "/proxy?url=" + urllib.parse.quote(img, safe="")
-                sequence.append({"src": proxied, "raw": img, "verticalOnly": url_is_vertical_only(img)})
+                src = "/proxy?url=" + urllib.parse.quote(img, safe="")
+                sequence.append({"src": src, "raw": img, "verticalOnly": url_is_vertical_only(img) or img in APPROVED_VERTICAL_URLS})
             data = json.dumps(sequence).encode("utf-8")
             self.safe_send_bytes(200, data, "application/json; charset=utf-8", {"Cache-Control": "no-store"})
             return
@@ -1966,24 +2067,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/sources.json":
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            counts = {"bbc": 0, "ap": 0, "reuters": 0, "guardian": 0, "npr": 0, "other": 0}
+            counts = {"bbc": 0, "reuters": 0, "guardian": 0, "other": 0}
             for img in images:
                 lower = img.lower()
                 if "bbci.co.uk" in lower:
                     counts["bbc"] += 1
-                elif "apnews.com" in lower or "assets.apnews.com" in lower:
-                    counts["ap"] += 1
-                elif "reuters" in lower:
+                elif "reuters" in lower or "arcpublishing" in lower:
                     counts["reuters"] += 1
                 elif "guim.co.uk" in lower or "theguardian" in lower:
                     counts["guardian"] += 1
-                elif "npr" in lower or "brightspotcdn" in lower:
-                    counts["npr"] += 1
                 else:
                     counts["other"] += 1
-
-            ap_sample = [img for img in images if "apnews.com" in img.lower()][:40]
-            data = json.dumps({"total": len(images), "counts": counts, "ap_sample": ap_sample, "sample": images[:40]}, indent=2).encode("utf-8")
+            data = json.dumps({"total": len(images), "counts": counts, "sample": images[:40]}, indent=2).encode("utf-8")
             self.safe_send_bytes(200, data, "application/json; charset=utf-8", {"Cache-Control": "no-store"})
             return
 
@@ -2000,17 +2095,6 @@ class Handler(BaseHTTPRequestHandler):
             if rejected and time.time() - rejected["time"] < REJECT_CACHE_SECONDS:
                 self.safe_send_bytes(415, b"Rejected", extra_headers={"Cache-Control": "no-store"})
                 return
-            # AP dims URLs consistently 403 from datacenter IPs.
-            # Only serve from proxy cache (pre-cached at pool build time), otherwise skip.
-            if "dims.apnews.com" in url:
-                cached = PROXY_CACHE.get(url)
-                if cached and time.time() - cached["time"] < PROXY_CACHE_SECONDS:
-                    self.safe_send_bytes(200, cached["data"], cached["content_type"], {"Cache-Control": "public, max-age=300"})
-                    return
-                REJECT_CACHE[url] = {"time": time.time()}
-                self.safe_send_bytes(415, b"AP not in cache", extra_headers={"Cache-Control": "no-store"})
-                return
-
             cached = PROXY_CACHE.get(url)
             if cached and time.time() - cached["time"] < PROXY_CACHE_SECONDS:
                 self.safe_send_bytes(200, cached["data"], cached["content_type"], {"Cache-Control": "public, max-age=300"})
@@ -2034,14 +2118,19 @@ class Handler(BaseHTTPRequestHandler):
                     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                     if img is not None:
                         ih, iw = img.shape[:2]
+                        # Higher resolution floor for NPR — their images are often soft.
+                        min_w = MIN_IMAGE_WIDTH
+                        min_h = MIN_IMAGE_HEIGHT
                         if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
                             REJECT_CACHE[url] = {"time": time.time()}
                             self.safe_send_bytes(415, b"Rejected low resolution image", extra_headers={"Cache-Control": "no-store"})
                             return
                         if ih > iw * 1.4:
-                            REJECT_CACHE[url] = {"time": time.time()}
-                            self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
-                            return
+                            if ih > iw * 2.2 or iw < min_w * 0.5:
+                                REJECT_CACHE[url] = {"time": time.time()}
+                                self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
+                                return
+                            APPROVED_VERTICAL_URLS.add(url)
                         cropped, did_crop = crop_top_if_needed(img, url)
                         if cropped is not None and cropped.size > 0:
                             ok, encoded = cv2.imencode(".jpg", cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
@@ -2056,7 +2145,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             except Exception as e:
                 REJECT_CACHE[url] = {"time": time.time()}
-                print("[FETCH FAILED]", url, e)
+                print("[FETCH FAILED]", url[:80], e)
                 self.safe_send_bytes(502, b"Image fetch failed")
                 return
         self.safe_send_bytes(404, b"Not found")
@@ -2065,6 +2154,8 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     REJECT_CACHE.clear()
     APPROVED_URLS.clear()
+    APPROVED_VERTICAL_URLS.clear()
+    _load_guardian_cache_from_disk()
     print()
     print("misshurry")
     print("RSS + AP/Reuters/Guardian/NPR image pool: ON")
@@ -2073,4 +2164,7 @@ if __name__ == "__main__":
     print()
     bg = threading.Thread(target=_background_pool_refresher, daemon=True)
     bg.start()
+    # Fast seed so the page isn't black while the full pool builds.
+    seed_thread = threading.Thread(target=_fast_startup_seed, daemon=True)
+    seed_thread.start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
