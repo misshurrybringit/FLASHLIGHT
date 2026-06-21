@@ -88,7 +88,7 @@ def fetch_guardian_api_images(limit=200):
             url = (
                 f"https://content.guardianapis.com/search"
                 f"?section={section}&show-fields=main&page-size={page_size}"
-                f"&order-by=newest&api-key={GUARDIAN_API_KEY}"
+                f"&type=article&order-by=newest&api-key={GUARDIAN_API_KEY}"
             )
             data = fetch_text(url, timeout=3)
             blob = json.loads(data)
@@ -134,7 +134,7 @@ def fetch_guardian_api_images(limit=200):
     return images
 
 GUARDIAN_API_CACHE = {"images": [], "time": 0}
-GUARDIAN_API_CACHE_SECONDS = 86400  # 24 hours — free tier is 12 req/day
+GUARDIAN_API_CACHE_SECONDS = 7200  # 2 hours — free dev tier is 500-5000 req/day, far more headroom than previously assumed
 GUARDIAN_API_CACHE_FILE = "/tmp/guardian_api_cache.json"
 
 
@@ -1516,22 +1516,22 @@ def image_has_center_divider(data):
     # and a much taller, more consistent run — real divider lines/borders are
     # stark and span nearly the full height; ordinary photo content (sky,
     # water, shadow) rarely does both at once.
-    bright = gray > 245
-    dark = gray < 12
+    bright = gray > 248
+    dark = gray < 8
     center_min = int(w * 0.18)
     center_max = int(w * 0.82)
     for x in range(center_min, center_max):
         bright_band = bright[:, max(0, x - 1):min(w, x + 2)]
         dark_band = dark[:, max(0, x - 1):min(w, x + 2)]
-        bright_by_row = np.mean(bright_band, axis=1) > 0.6
-        dark_by_row = np.mean(dark_band, axis=1) > 0.6
+        bright_by_row = np.mean(bright_band, axis=1) > 0.7
+        dark_by_row = np.mean(dark_band, axis=1) > 0.7
         for line_by_row in (bright_by_row, dark_by_row):
             full_height_frac = float(np.mean(line_by_row))
-            if full_height_frac > 0.80:
+            if full_height_frac > 0.88:
                 return True
-            if full_height_frac > 0.65:
+            if full_height_frac > 0.75:
                 transitions = np.diff(line_by_row.astype(np.int8))
-                if int(np.sum(transitions == 1)) <= 3:
+                if int(np.sum(transitions == 1)) <= 2:
                     return True
     grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     edge_strength = np.abs(grad_x)
@@ -1542,26 +1542,26 @@ def image_has_center_divider(data):
     baseline = float(np.median(col_energy)) + 1e-6
     # Count how many columns have strong vertical edge energy — multiple dividers
     # show up as multiple high-energy columns across the image.
-    strong_cols = np.sum(center_energy > baseline * 2.8)
+    strong_cols = np.sum(center_energy > baseline * 3.4)
     if strong_cols >= 2:
-        strong_col_indices = np.where(center_energy > baseline * 2.8)[0]
+        strong_col_indices = np.where(center_energy > baseline * 3.4)[0]
         for ci in strong_col_indices:
             abs_ci = center_min + ci
             col_slice = edge_strength[:, max(0, abs_ci - 1):min(w, abs_ci + 2)]
             row_strength = col_slice.mean(axis=1)
             row_baseline = float(np.median(row_strength)) + 1e-6
-            strong_frac = float(np.mean(row_strength > row_baseline * 1.6))
-            if strong_frac > 0.55:
+            strong_frac = float(np.mean(row_strength > row_baseline * 1.8))
+            if strong_frac > 0.70:
                 return True
     divider_x = center_min + int(np.argmax(center_energy))
     peak_energy = float(col_energy[divider_x])
-    if peak_energy < baseline * 2.8:
+    if peak_energy < baseline * 3.4:
         return False
     col_slice = edge_strength[:, max(0, divider_x - 1):min(w, divider_x + 2)]
     row_strength = col_slice.mean(axis=1)
     row_baseline = float(np.median(row_strength)) + 1e-6
-    strong_frac = float(np.mean(row_strength > row_baseline * 1.6))
-    return strong_frac > 0.50
+    strong_frac = float(np.mean(row_strength > row_baseline * 1.8))
+    return strong_frac > 0.65
 
 
 def render_html():
