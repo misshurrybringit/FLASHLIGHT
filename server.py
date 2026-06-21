@@ -1161,23 +1161,31 @@ def _pre_vet_one(url):
         data, content_type = fetch_bytes(url, timeout=8)
         if not content_type.startswith("image/"):
             REJECT_CACHE[url] = {"time": time.time()}
+            if is_bbc:
+                print(f"[VET] BBC rejected (not image, content_type={content_type}): {url[:90]}", flush=True)
             return
         arr = np.frombuffer(data, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
             REJECT_CACHE[url] = {"time": time.time()}
+            if is_bbc:
+                print(f"[VET] BBC rejected (decode failed): {url[:90]}", flush=True)
             return
         ih, iw = img.shape[:2]
         min_w = MIN_IMAGE_WIDTH
         min_h = MIN_IMAGE_HEIGHT
         if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
             REJECT_CACHE[url] = {"time": time.time()}
+            if is_bbc:
+                print(f"[VET] BBC rejected (too small {iw}x{ih}): {url[:90]}", flush=True)
             return
         if ih > iw * 1.4:
             # Moderate verticals (up to ~2.2:1) are kept for mobile use instead
             # of being discarded — extreme/banner-like crops are still rejected.
             if ih > iw * 2.2 or iw < min_w * 0.5:
                 REJECT_CACHE[url] = {"time": time.time()}
+                if is_bbc:
+                    print(f"[VET] BBC rejected (extreme vertical {iw}x{ih}): {url[:90]}", flush=True)
                 return
             APPROVED_VERTICAL_URLS.add(url)
         # The isolated-subject/portrait check is tuned for Guardian's stock-photo
@@ -1197,9 +1205,15 @@ def _pre_vet_one(url):
             return
         if image_has_center_divider(data):
             REJECT_CACHE[url] = {"time": time.time()}
+            if is_bbc:
+                print(f"[VET] BBC rejected (center divider): {url[:90]}", flush=True)
             return
         APPROVED_URLS.add(url)
-    except Exception:
+        if is_bbc:
+            print(f"[VET] BBC approved: {url[:90]}", flush=True)
+    except Exception as e:
+        if is_bbc:
+            print(f"[VET] BBC fetch/exception ({e}): {url[:90]}", flush=True)
         pass
 
 
