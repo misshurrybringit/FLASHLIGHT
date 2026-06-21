@@ -856,10 +856,6 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         is_from_api = img in GUARDIAN_IMAGE_SECTION
         api_rank = section_rank.get(GUARDIAN_IMAGE_SECTION.get(img, ""), 3)
         return (1 if is_from_api else 0, api_rank)
-    # Sort newest-first by date first (stable sort), then by tier/source —
-    # the later sort takes priority but ties (same tier) preserve the
-    # newest-first date order from this first pass.
-    buckets["guardian"] = sorted(buckets["guardian"], key=lambda img: GUARDIAN_IMAGE_DATE.get(img, ""), reverse=True)
     buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
 
     # Other sources (Al Jazeera) keep their existing feed/scrape order.
