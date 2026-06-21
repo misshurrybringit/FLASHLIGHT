@@ -26,24 +26,6 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
-    "https://apnews.com/world-news",
-    "https://apnews.com/us-news",
-    "https://apnews.com/politics",
-    "https://apnews.com/hub/world-news",
-    "https://apnews.com/hub/ap-top-news",
-    "https://apnews.com/hub/politics",
-    "https://apnews.com/hub/middle-east",
-    "https://apnews.com/hub/europe",
-    "https://apnews.com/hub/africa",
-    "https://apnews.com/hub/latin-america",
-    "https://apnews.com/hub/asia-pacific",
-    "https://www.reuters.com/world/",
-    "https://www.reuters.com/world/us/",
-    "https://www.reuters.com/world/europe/",
-    "https://www.reuters.com/world/asia-pacific/",
-    "https://www.reuters.com/world/middle-east/",
-    "https://www.reuters.com/world/africa/",
-    "https://www.reuters.com/pictures/",
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
     "https://www.aljazeera.com/news/",
@@ -287,9 +269,20 @@ def upgrade_bbc_image_url(url):
     url = url.replace("/1024/", "/2048/")
     url = re.sub(r"/ic/\d+x\d+/", "/ic/2048x1152/", url)
     url = re.sub(r"/standard/\d+/", "/standard/2048/", url)
-    # NOTE: do not rewrite dims.apnews.com resize dimensions — AP's CDN
-    # rejects mismatched aspect ratios (400 Bad Request) and forcing a fixed
-    # size increases load, worsening 429 rate limiting. Leave AP URLs as-is.
+    # AP's dims.apnews.com proxy has a /resize/WxH!/ segment specifying the
+    # final output size, separate from the /crop/ region. Scale it up while
+    # preserving its aspect ratio (forcing a fixed ratio caused 400 errors
+    # when it didn't match the crop). Cap the upscale so we don't trigger
+    # excessive CDN load (which was worsening 429 rate limiting).
+    def _upgrade_ap_resize(match):
+        rw, rh = int(match.group(1)), int(match.group(2))
+        if rw <= 0 or rh <= 0:
+            return match.group(0)
+        target_w = min(max(rw, 1440), 1800)
+        scale = target_w / rw
+        target_h = max(1, round(rh * scale))
+        return f"/resize/{target_w}x{target_h}!/"
+    url = re.sub(r'/resize/(\d+)x(\d+)!/', _upgrade_ap_resize, url)
     return url
 
 
@@ -814,20 +807,17 @@ def source_category(url):
     return "other"
 
 
-    mixed.extend(remaining)
-    return mixed[:limit]
-
-
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Interleave all sources, one at a time, no per-source caps.
+    """Interleave Guardian/BBC/Al Jazeera, one at a time, no per-source caps.
 
     Guardian images are ordered by section priority — world/us-news/politics
     first, then global-development/law, then everything else — regardless of
     recency. Other sources keep their existing feed/scrape order.
     """
-    buckets = {"ap": [], "reuters": [], "guardian": [], "npr": [], "bbc": [], "other": []}
+    buckets = {"guardian": [], "bbc": [], "other": []}
     for img in images:
-        buckets.setdefault(source_category(img), []).append(img)
+        cat = source_category(img)
+        buckets.setdefault(cat if cat in buckets else "other", []).append(img)
 
     # Guardian: sort strictly by section priority tier, not by date.
     section_rank = {
@@ -839,9 +829,9 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         return section_rank.get(GUARDIAN_IMAGE_SECTION.get(img, ""), 3)
     buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
 
-    # Other sources: keep their existing feed/scrape order (already newest-first).
+    # Other sources (Al Jazeera) keep their existing feed/scrape order.
 
-    order = ["ap", "bbc", "guardian", "reuters", "other", "npr"]
+    order = ["bbc", "guardian", "other"]
     queues = {name: list(buckets[name]) for name in order}
     mixed = []
     already = set()
@@ -1018,12 +1008,10 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                 pass
 
     # Sort each source by feed order (newest first), then interleave with weighted mix.
-    ap_imgs = [img for img in images if source_category(img) == "ap"]
     guardian_imgs = [img for img in images if source_category(img) == "guardian"]
-    reuters_imgs = [img for img in images if source_category(img) == "reuters"]
-    other_imgs = [img for img in images if source_category(img) not in ("ap", "guardian", "reuters", "bbc")]
     bbc_imgs = [img for img in images if source_category(img) == "bbc"]
-    ordered_by_source = guardian_imgs + ap_imgs + reuters_imgs + other_imgs + bbc_imgs
+    other_imgs = [img for img in images if source_category(img) not in ("guardian", "bbc")]
+    ordered_by_source = guardian_imgs + other_imgs + bbc_imgs
     ordered = weighted_image_mix(ordered_by_source, limit=limit)
 
     with IMAGE_CACHE["lock"]:
