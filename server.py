@@ -235,6 +235,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "40cca0401fe2c7d427bb3fbb79f43c0007165eb3",
     "c5f90dd0-6bcc-11f1-8e1d-bbbb1017d210",
     "ad8daf8b33ef8da2bcac89b8d0a5d6ab64e2f3ed",
+    "Post-Label-Image-Option-1-1780213226",
+    "Ahmed-Wishah-1781977869",
+    "e35ca6a4be4b3a80e6eb5c4f9e9711956b208758",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -283,6 +286,10 @@ def upgrade_bbc_image_url(url):
         target_h = max(1, round(rh * scale))
         return f"/resize/{target_w}x{target_h}!/"
     url = re.sub(r'/resize/(\d+)x(\d+)!/', _upgrade_ap_resize, url)
+    # Al Jazeera WordPress images often cap quality=80 in the resize query
+    # param — bump it up for a sharper result.
+    if "aljazeera.com" in url:
+        url = re.sub(r'quality=\d+', 'quality=95', url)
     return url
 
 
@@ -297,6 +304,20 @@ def clean_extracted_image_url(url):
     lower = url.lower()
     if any(bad in lower for bad in ["logo", "placeholder", "blank", "sprite", "icon"]):
         return None
+    # Al Jazeera's WordPress CDN serves some images from thumbnail-derived
+    # source assets (filename contains "thumb") which stay soft even when
+    # resized larger — reject these rather than show a blurry upscale.
+    if "aljazeera.com" in lower and "thumb" in lower:
+        return None
+    # Al Jazeera also serves small UI label/badge graphics (e.g. "Post-Label",
+    # "Breaking-Label") that aren't photos at all, plus tiny fit= dimensions
+    # that confirm a non-photo asset.
+    if "aljazeera.com" in lower:
+        if any(t in lower for t in ["post-label", "label-image", "badge-", "-label-"]):
+            return None
+        fit_match = re.search(r'fit=(\d+)%2c(\d+)', lower)
+        if fit_match and (int(fit_match.group(1)) < 200 or int(fit_match.group(2)) < 200):
+            return None
     # Reject SVG and GIF files.
     if lower.endswith(".svg") or ".svg?" in lower:
         return None
@@ -1166,7 +1187,12 @@ def _pre_vet_one(url):
         if not is_bbc and image_is_portrait_or_generic_isolated_subject(data, allow_vertical=(ih > iw * 1.4)):
             REJECT_CACHE[url] = {"time": time.time()}
             return
-        if image_is_probably_full_graphic_page(data):
+        # The graphic-page check (designed to catch infographics/charts) flags
+        # large flat color regions — blue sky, water, white clothing/buildings
+        # are extremely common in real outdoor news photos and were causing
+        # heavy false-positive rejection of legitimate BBC photos. Skip it for
+        # BBC; the center-divider check below still catches composite images.
+        if not is_bbc and image_is_probably_full_graphic_page(data):
             REJECT_CACHE[url] = {"time": time.time()}
             return
         if image_has_center_divider(data):
@@ -1823,12 +1849,15 @@ function loadRandomSlide(attempts=0) {{
   const loader = new Image();
   loader.decoding = "async";
 
-  // Safety valve — if the image neither loads nor errors within 6s, move on.
+  // Safety valve — if the image neither loads nor errors within 11s, move on.
+  // The server's own proxy fetch has an 8s timeout, so this needs headroom
+  // above that or slow-loading images (e.g. BBC on a cold cache) get
+  // blacklisted client-side before the server even finishes fetching them.
   let timeout = setTimeout(() => {{
     isLoadingSlide = false;
     badSrcs.add(src);
     loadRandomSlide(attempts + 1);
-  }}, 6000);
+  }}, 11000);
 
   // Use preloaded image if ready, otherwise fetch normally.
   const preloaded = preloadCache.get(src);
