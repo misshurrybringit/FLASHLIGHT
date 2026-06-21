@@ -1594,7 +1594,7 @@ def render_html():
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{
-  display: block;
+  display: none;
   position: fixed;
   bottom: 12px;
   left: 50%;
