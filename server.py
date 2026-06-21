@@ -241,6 +241,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "Ahmed-Wishah-1781977869",
     "e35ca6a4be4b3a80e6eb5c4f9e9711956b208758",
     "image-1781976244",
+    "image-1782060560",
+    "48cc8790-6bf1-11f1-b1db-af71d47507d6",
+    "image-1782053254",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1158,11 +1161,35 @@ def _pre_vet_one(url):
     """Fetch and check one image; add to APPROVED_URLS if it passes."""
     if url in APPROVED_URLS:
         return
-    # Non-Guardian, non-BBC sources — approve without cv2.
     is_guardian = "guim.co.uk" in url or "theguardian.com" in url
     is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
     if not is_guardian and not is_bbc:
-        APPROVED_URLS.add(url)
+        # Other sources (Al Jazeera) skip the heavier cv2 graphic/divider
+        # checks, but still get a lightweight fetch + ratio check so verticals
+        # are correctly tagged for mobile-only display instead of showing
+        # everywhere uncropped.
+        try:
+            data, content_type = fetch_bytes(url, timeout=8)
+            if not content_type.startswith("image/"):
+                REJECT_CACHE[url] = {"time": time.time()}
+                return
+            arr = np.frombuffer(data, np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is None:
+                REJECT_CACHE[url] = {"time": time.time()}
+                return
+            ih, iw = img.shape[:2]
+            if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
+                REJECT_CACHE[url] = {"time": time.time()}
+                return
+            if ih > iw * 1.4:
+                if ih > iw * 2.2 or iw < MIN_IMAGE_WIDTH * 0.5:
+                    REJECT_CACHE[url] = {"time": time.time()}
+                    return
+                APPROVED_VERTICAL_URLS.add(url)
+            APPROVED_URLS.add(url)
+        except Exception:
+            pass
         return
     # Guardian and BBC — run cv2 checks.
     try:
