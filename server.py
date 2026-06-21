@@ -24,7 +24,8 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
 
-
+    # Der Spiegel — backup.
+    "https://www.spiegel.de/international/index.rss",
 ]
 
 SOURCE_PAGES = [
