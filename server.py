@@ -26,8 +26,10 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
+    "https://www.theguardian.com/",
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
+    "https://www.theguardian.com/politics",
     "https://www.aljazeera.com/news/",
 ]
 
@@ -238,6 +240,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "Post-Label-Image-Option-1-1780213226",
     "Ahmed-Wishah-1781977869",
     "e35ca6a4be4b3a80e6eb5c4f9e9711956b208758",
+    "image-1781976244",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -831,23 +834,28 @@ def source_category(url):
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     """Interleave Guardian/BBC/Al Jazeera, one at a time, no per-source caps.
 
-    Guardian images are ordered by section priority — world/us-news/politics
-    first, then global-development/law, then everything else — regardless of
-    recency. Other sources keep their existing feed/scrape order.
+    Guardian images scraped directly from theguardian.com section pages
+    reflect real editorial choices (what Guardian's own editors are actually
+    featuring right now) and are prioritized ahead of images sourced from the
+    API's raw "newest article in section" results, which don't carry any
+    signal about how prominently a story is actually being featured.
     """
     buckets = {"guardian": [], "bbc": [], "other": []}
     for img in images:
         cat = source_category(img)
         buckets.setdefault(cat if cat in buckets else "other", []).append(img)
 
-    # Guardian: sort strictly by section priority tier, not by date.
+    # Guardian: scraped (editorially featured) images first, then API images
+    # sorted by section priority tier within that.
     section_rank = {
         "world": 0, "us-news": 0, "politics": 0,
         "global-development": 1, "law": 1,
         "society": 2, "business": 2, "cities": 2,
     }
     def guardian_sort_key(img):
-        return section_rank.get(GUARDIAN_IMAGE_SECTION.get(img, ""), 3)
+        is_from_api = img in GUARDIAN_IMAGE_SECTION
+        api_rank = section_rank.get(GUARDIAN_IMAGE_SECTION.get(img, ""), 3)
+        return (1 if is_from_api else 0, api_rank)
     buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
 
     # Other sources (Al Jazeera) keep their existing feed/scrape order.
