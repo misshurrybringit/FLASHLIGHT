@@ -136,7 +136,7 @@ def fetch_guardian_api_images(limit=200):
     return images
 
 GUARDIAN_API_CACHE = {"images": [], "time": 0}
-GUARDIAN_API_CACHE_SECONDS = 7200  # 2 hours — free dev tier is 500-5000 req/day, far more headroom than previously assumed
+GUARDIAN_API_CACHE_SECONDS = 3600  # 1 hour — free dev tier ~500-5000 req/day, 9 sections × 24 = 216 calls/day max
 GUARDIAN_API_CACHE_FILE = "/tmp/guardian_api_cache.json"
 
 
@@ -1164,32 +1164,10 @@ def _pre_vet_one(url):
     is_guardian = "guim.co.uk" in url or "theguardian.com" in url
     is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
     if not is_guardian and not is_bbc:
-        # Other sources (Al Jazeera) skip the heavier cv2 graphic/divider
-        # checks, but still get a lightweight fetch + ratio check so verticals
-        # are correctly tagged for mobile-only display instead of showing
-        # everywhere uncropped.
-        try:
-            data, content_type = fetch_bytes(url, timeout=8)
-            if not content_type.startswith("image/"):
-                REJECT_CACHE[url] = {"time": time.time()}
-                return
-            arr = np.frombuffer(data, np.uint8)
-            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if img is None:
-                REJECT_CACHE[url] = {"time": time.time()}
-                return
-            ih, iw = img.shape[:2]
-            if iw < MIN_IMAGE_WIDTH or ih < MIN_IMAGE_HEIGHT:
-                REJECT_CACHE[url] = {"time": time.time()}
-                return
-            if ih > iw * 1.4:
-                if ih > iw * 2.2 or iw < MIN_IMAGE_WIDTH * 0.5:
-                    REJECT_CACHE[url] = {"time": time.time()}
-                    return
-                APPROVED_VERTICAL_URLS.add(url)
-            APPROVED_URLS.add(url)
-        except Exception:
-            pass
+        # Non-Guardian/BBC sources (Al Jazeera etc) are auto-approved —
+        # vertical/ratio checking happens at proxy-serve time when the image
+        # is actually fetched for a user request.
+        APPROVED_URLS.add(url)
         return
     # Guardian and BBC — run cv2 checks.
     try:
@@ -1777,13 +1755,21 @@ function sourceScore(src) {{
   if (src.includes('aljazeera')) return 2;
   return 2;
 }}
+let _refillCount = 0;
 function refillPool() {{
+  _refillCount++;
+  // Periodically clear badSrcs so transient failures (slow proxy, brief
+  // network hiccup) don't permanently shrink the usable pool over time.
+  if (_refillCount % 8 === 0 && badSrcs.size > 0) {{
+    badSrcs.clear();
+  }}
+
   let candidates = slides
     .filter(slideAllowedForCurrentOrientation)
     .map(s => s.src)
     .filter(src => !badSrcs.has(src));
 
-  if (candidates.length < 10 && badSrcs.size > 0) {{
+  if (candidates.length < 20 && badSrcs.size > 0) {{
     badSrcs.clear();
     candidates = slides.filter(slideAllowedForCurrentOrientation).map(s => s.src);
   }}
@@ -1791,7 +1777,10 @@ function refillPool() {{
   candidates = [...new Set(candidates)];
 
   let fresh = candidates.filter(src => !_shownThisCycle.has(src));
-  if (fresh.length < 15) {{
+  // Only reset the cycle once truly exhausted — use a proportion of the
+  // candidate pool rather than a fixed low number, so with a large pool
+  // we don't reset prematurely.
+  if (fresh.length < Math.max(15, candidates.length * 0.1)) {{
     _shownThisCycle.clear();
     fresh = candidates;
   }}
@@ -2134,7 +2123,26 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 # If pre-vetted during pool build, skip all cv2 checks.
+                # But still run a lightweight ratio check for non-Guardian/BBC
+                # sources (e.g. Al Jazeera) that were auto-approved without
+                # dimension checking, so verticals get properly tagged.
                 if url in APPROVED_URLS:
+                    is_guardian = "guim.co.uk" in url or "theguardian.com" in url
+                    is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
+                    if not is_guardian and not is_bbc and url not in APPROVED_VERTICAL_URLS:
+                        try:
+                            arr = np.frombuffer(data, np.uint8)
+                            img_check = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                            if img_check is not None:
+                                ih, iw = img_check.shape[:2]
+                                if ih > iw * 1.4:
+                                    if ih > iw * 2.2:
+                                        REJECT_CACHE[url] = {"time": time.time()}
+                                        self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
+                                        return
+                                    APPROVED_VERTICAL_URLS.add(url)
+                        except Exception:
+                            pass
                     PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
                     self.safe_send_bytes(200, data, content_type, {"Cache-Control": "public, max-age=300"})
                     return
