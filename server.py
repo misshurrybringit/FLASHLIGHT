@@ -38,6 +38,9 @@ RSS_FEEDS = [
     # South China Morning Post — Hong Kong English-language, world + Asia coverage.
     "https://www.scmp.com/rss/5/feed",
     "https://www.scmp.com/rss/4/feed",
+
+    # Mercopress — independent English-language South American news agency.
+    "https://en.mercopress.com/rss",
 ]
 
 SOURCE_PAGES = [
@@ -291,6 +294,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "image-1781611733",
     "86ca4870-6e0d-11f1-8546-8f19e4fe30f4",
     "d79b2b10-6e22-11f1-8546-8f19e4fe30f4",
+    "0c1e7cd6-69a8-11f1-a995-005056bfb2b6",
+    "3c55cc7e-245e-4a29-a845-1d462fa0e9f4",
+    "76acff10-6d7b-11f1-a2ba-775ae811ce10",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -588,7 +594,7 @@ def extract_inline_images_from_html(html, base_url, max_images=35):
             if key in seen:
                 continue
             lower = img.lower()
-            if not any(token in lower for token in ["ichef.bbci", "guardian", "aljazeera", "france24", "brightspotcdn", "cgtn", "i-scmp"]):
+            if not any(token in lower for token in ["ichef.bbci", "guardian", "aljazeera", "france24", "brightspotcdn", "cgtn", "i-scmp", "mercopress"]):
                 continue
             seen.add(key)
             imgs.append(img)
@@ -729,6 +735,7 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "img.cgtn.com",
             "img.i-scmp.com",
             "cdn.i-scmp.com",
+            "mercopress.com",
             "npr.brightspotcdn.com",
             ".jpg",
             ".jpeg",
@@ -945,7 +952,7 @@ def source_category(url):
     lower = (url or "").lower()
     if "guim.co.uk" in lower or "theguardian" in lower:
         return "guardian"
-    if "aljazeera" in lower or "france24" in lower or "brightspotcdn" in lower or "cgtn" in lower or "i-scmp" in lower or "scmp" in lower:
+    if "aljazeera" in lower or "france24" in lower or "brightspotcdn" in lower or "cgtn" in lower or "i-scmp" in lower or "scmp" in lower or "mercopress" in lower:
         return "other"
     if "bbci.co.uk" in lower or "bbc.co.uk" in lower:
         return "bbc"
@@ -1370,14 +1377,15 @@ def _pre_vet_one(url):
     is_guardian = "guim.co.uk" in url or "theguardian.com" in url
     is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
     is_aljazeera = "aljazeera" in url.lower()
-    if not is_guardian and not is_bbc and not is_aljazeera:
-        # Other sources (France 24, NPR) are auto-approved —
+    is_scmp = "i-scmp.com" in url.lower() or "scmp.com" in url.lower()
+    is_france24 = "france24.com" in url.lower()
+    if not is_guardian and not is_bbc and not is_aljazeera and not is_scmp and not is_france24:
+        # Other sources (CGTN etc) are auto-approved —
         # vertical/ratio checking happens at proxy-serve time.
         APPROVED_URLS.add(url)
         return
-    if is_aljazeera:
-        # Al Jazeera: run graphic-page detection only (no portrait/divider checks).
-        # Fetch is lightweight since Al Jazeera's CDN is generally accessible.
+    if is_aljazeera or is_scmp or is_france24:
+        # Run graphic-page detection only (no portrait/divider checks).
         try:
             data, content_type = fetch_bytes(url, timeout=8)
             if not content_type.startswith("image/"):
@@ -1386,9 +1394,11 @@ def _pre_vet_one(url):
             if image_is_probably_full_graphic_page(data):
                 REJECT_CACHE[url] = {"time": time.time()}
                 return
+            if image_has_center_divider(data):
+                REJECT_CACHE[url] = {"time": time.time()}
+                return
             APPROVED_URLS.add(url)
         except Exception:
-            # If fetch fails, auto-approve rather than silently drop
             APPROVED_URLS.add(url)
         return
     # Guardian and BBC — run full cv2 checks.
@@ -2326,7 +2336,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/sources.json":
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            counts = {"bbc": 0, "guardian": 0, "aljazeera": 0, "france24": 0, "cgtn": 0, "scmp": 0, "other": 0}
+            counts = {"bbc": 0, "guardian": 0, "aljazeera": 0, "france24": 0, "cgtn": 0, "scmp": 0, "mercopress": 0, "other": 0}
             for img in images:
                 lower = img.lower()
                 if "bbci.co.uk" in lower:
@@ -2341,6 +2351,8 @@ class Handler(BaseHTTPRequestHandler):
                     counts["cgtn"] += 1
                 elif "i-scmp" in lower or "scmp" in lower:
                     counts["scmp"] += 1
+                elif "mercopress" in lower:
+                    counts["mercopress"] += 1
                 else:
                     counts["other"] += 1
             data = json.dumps({"total": len(images), "counts": counts, "sample": images[:40]}, indent=2).encode("utf-8")
