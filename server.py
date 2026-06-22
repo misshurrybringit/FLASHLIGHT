@@ -366,7 +366,7 @@ def clean_extracted_image_url(url):
     # images with text/graphics overlaid — not clean news photos.
     if "france24.com" in lower and lower.endswith("-cs.jpg"):
         return None
-    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-"]):
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "france-m%c3%a9dias", "france-medias", "1280x720px", "1920x1080px"]):
         return None
     # France 24 URLs contain a /w:NNN/ width parameter — reject small sizes
     # and upgrade larger ones to 1280px for better quality.
@@ -2232,13 +2232,19 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/sources.json":
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            counts = {"bbc": 0, "guardian": 0, "other": 0}
+            counts = {"bbc": 0, "guardian": 0, "aljazeera": 0, "france24": 0, "npr": 0, "other": 0}
             for img in images:
                 lower = img.lower()
                 if "bbci.co.uk" in lower:
                     counts["bbc"] += 1
                 elif "guim.co.uk" in lower or "theguardian" in lower:
                     counts["guardian"] += 1
+                elif "aljazeera" in lower:
+                    counts["aljazeera"] += 1
+                elif "france24" in lower:
+                    counts["france24"] += 1
+                elif "brightspotcdn" in lower:
+                    counts["npr"] += 1
                 else:
                     counts["other"] += 1
             data = json.dumps({"total": len(images), "counts": counts, "sample": images[:40]}, indent=2).encode("utf-8")
