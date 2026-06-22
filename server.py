@@ -403,7 +403,7 @@ def clean_extracted_image_url(url):
     # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, FR-2.jpg etc)
     if "france24.com" in lower and re.search(r'/[a-z]{2,4}-\d+(-\d+)?\.jpg$', lower):
         return None
-    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "1280x720px", "1280x720-", "1920x1080px", "1920x1080-", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette"]):
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "news_en", "news_fr", "news_ar"]):
         return None
     # France 24 URLs contain a /w:NNN/ width parameter — reject small sizes
     # and upgrade larger ones to 1280px for better quality.
@@ -989,7 +989,7 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     API's raw "newest article in section" results, which don't carry any
     signal about how prominently a story is actually being featured.
     """
-    buckets = {"guardian": [], "bbc": [], "aljazeera": [], "france24": [], "other": []}
+    buckets = {"guardian": [], "bbc": [], "aljazeera": [], "france24": [], "international": [], "other": []}
     for img in images:
         lower = img.lower()
         if "guim.co.uk" in lower or "theguardian" in lower:
@@ -1000,6 +1000,8 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
             buckets["aljazeera"].append(img)
         elif "france24" in lower:
             buckets["france24"].append(img)
+        elif any(t in lower for t in ["mercopress", "i-scmp", "scmp", "cgtn"]):
+            buckets["international"].append(img)
         else:
             buckets["other"].append(img)
 
@@ -1072,11 +1074,14 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         return (0, age)
     buckets["france24"] = sorted(buckets["france24"], key=f24_sort_key)
 
+    # International (SCMP/CGTN/Mercopress): apply same age sort where UUIDs exist.
+    buckets["international"] = sorted(buckets["international"], key=f24_sort_key)
+
     # Al Jazeera: no UUID timestamps, keep feed/scrape order (already fresh).
     # Guardian: existing sort already handles age via GUARDIAN_IMAGE_DATE.
 
     # Interleave: Al Jazeera first (most current), then BBC, France 24, Guardian.
-    order = ["aljazeera", "bbc", "france24", "guardian", "other"]
+    order = ["aljazeera", "bbc", "france24", "international", "guardian", "other"]
     queues = {name: list(buckets[name]) for name in order}
     mixed = []
     already = set()
