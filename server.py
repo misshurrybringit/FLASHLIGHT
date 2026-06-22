@@ -42,6 +42,9 @@ SOURCE_PAGES = [
     "https://www.theguardian.com/us-news",
     "https://www.theguardian.com/politics",
     "https://www.aljazeera.com/news/",
+    "https://www.aljazeera.com/where/middle-east/",
+    "https://www.aljazeera.com/where/africa/",
+    "https://www.aljazeera.com/where/asia/",
     "https://www.france24.com/en/",
 ]
 
@@ -356,7 +359,7 @@ def clean_extracted_image_url(url):
         if fit_match and (int(fit_match.group(1)) < 200 or int(fit_match.group(2)) < 200):
             return None
         resize_match = re.search(r'resize=(\d+)%2c(\d+)', lower)
-        if resize_match and int(resize_match.group(1)) < MIN_IMAGE_WIDTH:
+        if resize_match and int(resize_match.group(1)) < 600:
             return None
         # Filenames with embedded dimensions (e.g. "image-1000x562.jpg") are
         # pre-sized graphic assets, not raw photos.
@@ -410,12 +413,15 @@ def clean_extracted_image_url(url):
         # NPR .png files are usually graphics, not photos
         if lower.endswith(".png"):
             return None
-        # Reject staff/byline headshots — these are photographer/journalist
-        # portraits, not news images (typically square crops in the URL).
-        if "crop/" in lower and re.search(r'crop/(\d+)x\1', lower):  # square crop
+        # Reject staff/byline headshots — square crops
+        if "crop/" in lower and re.search(r'crop/(\d+)x\1', lower):
+            return None
+        # Reject forced-aspect distorted resizes (e.g. resize/1800x101!) — tiny height
+        forced_resize = re.search(r'resize/(\d+)x(\d+)!', lower)
+        if forced_resize and int(forced_resize.group(2)) < 200:
             return None
         # Upgrade resolution — handle both resize/NNN and resize/NNNxMMM formats
-        url = re.sub(r'resize/\d+x\d+', 'resize/1400x788', url)
+        url = re.sub(r'resize/\d+x\d+!?', 'resize/1400x788', url)
         url = re.sub(r'resize/\d+(?!x)', 'resize/1400', url)
     # BBC /images/ic/ URLs with programme IDs (p0...) are show/podcast assets, not news photos.
     if "bbci.co.uk/images/ic/" in lower and "/p0" in lower:
