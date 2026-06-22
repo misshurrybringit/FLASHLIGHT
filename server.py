@@ -39,8 +39,13 @@ RSS_FEEDS = [
     "https://www.scmp.com/rss/5/feed",
     "https://www.scmp.com/rss/4/feed",
 
-    # Mexico News Daily — English-language Mexico news, WordPress CDN images.
-    "https://mexiconewsdaily.com/feed",
+    # Deutsche Welle — Germany's international broadcaster, strong Eastern Europe coverage.
+    "https://rss.dw.com/rdf/rss-en-all",
+
+    # CBC Canada — Canadian public broadcaster, world news section.
+    "https://www.cbc.ca/webfeed/rss/rss-world",
+
+    # Mexico News Daily — blocked by Cloudflare from Render's IPs.
 ]
 
 SOURCE_PAGES = [
@@ -298,6 +303,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "3c55cc7e-245e-4a29-a845-1d462fa0e9f4",
     "76acff10-6d7b-11f1-a2ba-775ae811ce10",
     "ccff1ef8-c0b7-4dd3-bf0e-9b98ee86f672",
+    "30742380-6e51-11f1-8c89-cfc50446b805",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -408,7 +414,10 @@ def clean_extracted_image_url(url):
     # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, FR-2.jpg etc)
     if "france24.com" in lower and re.search(r'/[a-z]{2,4}-\d+(-\d+)?\.jpg$', lower):
         return None
-    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "news_en", "news_fr", "news_ar"]):
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "-fmm-", "fmm-en", "fmm-fr", "fmm-ar", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "news_en", "news_fr", "news_ar"]):
+        return None
+    # Also catch filenames ending in -EN.jpg, -FR.jpg, -AR.jpg (broadcast language tags)
+    if "france24.com" in lower and re.search(r'-(en|fr|ar)\.jpg$', lower):
         return None
     # France 24 URLs contain a /w:NNN/ width parameter — reject small sizes
     # and upgrade larger ones to 1280px for better quality.
@@ -425,6 +434,8 @@ def clean_extracted_image_url(url):
     if lower.endswith(".svg") or ".svg?" in lower:
         return None
     if lower.endswith(".gif") or ".gif?" in lower:
+        return None
+    if "ytimg.com" in lower or "youtube.com" in lower:
         return None
     # Reject sports and entertainment images by filename keywords.
     sports_entertainment_terms = [
@@ -599,7 +610,7 @@ def extract_inline_images_from_html(html, base_url, max_images=35):
             if key in seen:
                 continue
             lower = img.lower()
-            if not any(token in lower for token in ["ichef.bbci", "guardian", "aljazeera", "france24", "brightspotcdn", "cgtn", "i-scmp", "mexiconewsdaily"]):
+            if not any(token in lower for token in ["ichef.bbci", "guardian", "aljazeera", "france24", "brightspotcdn", "cgtn", "i-scmp", "mexiconewsdaily", "static.dw", "i.cbc"]):
                 continue
             seen.add(key)
             imgs.append(img)
@@ -741,6 +752,9 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "img.i-scmp.com",
             "cdn.i-scmp.com",
             "mexiconewsdaily.com",
+            "static.dw.com",
+            "i.cbc.ca",
+            "cbcrc.ca",
             "npr.brightspotcdn.com",
             ".jpg",
             ".jpeg",
@@ -957,7 +971,7 @@ def source_category(url):
     lower = (url or "").lower()
     if "guim.co.uk" in lower or "theguardian" in lower:
         return "guardian"
-    if "aljazeera" in lower or "france24" in lower or "brightspotcdn" in lower or "cgtn" in lower or "i-scmp" in lower or "scmp" in lower or "mexiconewsdaily" in lower:
+    if "aljazeera" in lower or "france24" in lower or "brightspotcdn" in lower or "cgtn" in lower or "i-scmp" in lower or "scmp" in lower or "mexiconewsdaily" in lower or "static.dw" in lower or "i.cbc" in lower:
         return "other"
     if "bbci.co.uk" in lower or "bbc.co.uk" in lower:
         return "bbc"
@@ -1005,7 +1019,7 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
             buckets["aljazeera"].append(img)
         elif "france24" in lower:
             buckets["france24"].append(img)
-        elif any(t in lower for t in ["mexiconewsdaily", "i-scmp", "scmp", "cgtn"]):
+        elif any(t in lower for t in ["mexiconewsdaily", "i-scmp", "scmp", "cgtn", "static.dw", "i.cbc"]):
             buckets["international"].append(img)
         else:
             buckets["other"].append(img)
@@ -1169,6 +1183,15 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             item_limit = 750 if is_bbc else 90
             found_imgs = 0
             for item in items[:item_limit]:
+                # Skip BBC items from sections we don't want
+                if is_bbc:
+                    link_el = item.find("link")
+                    link_url = (link_el.text or "") if link_el is not None else ""
+                    if any(s in link_url for s in [
+                        "/technology/", "/tech/", "/sport/", "/entertainment/",
+                        "/culture/", "/travel/", "/food/", "/science/",
+                    ]):
+                        continue
                 img = extract_rss_item_image(item)
                 if img:
                     cleaned = clean_extracted_image_url(img)
@@ -2346,7 +2369,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/sources.json":
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            counts = {"bbc": 0, "guardian": 0, "aljazeera": 0, "france24": 0, "cgtn": 0, "scmp": 0, "mexico": 0, "other": 0}
+            counts = {"bbc": 0, "guardian": 0, "aljazeera": 0, "france24": 0, "cgtn": 0, "scmp": 0, "dw": 0, "cbc": 0, "other": 0}
             for img in images:
                 lower = img.lower()
                 if "bbci.co.uk" in lower:
@@ -2361,8 +2384,10 @@ class Handler(BaseHTTPRequestHandler):
                     counts["cgtn"] += 1
                 elif "i-scmp" in lower or "scmp" in lower:
                     counts["scmp"] += 1
-                elif "mexiconewsdaily" in lower:
-                    counts["mexico"] += 1
+                elif "static.dw" in lower:
+                    counts["dw"] += 1
+                elif "i.cbc" in lower or "cbcrc" in lower:
+                    counts["cbc"] += 1
                 else:
                     counts["other"] += 1
             data = json.dumps({"total": len(images), "counts": counts, "sample": images[:40]}, indent=2).encode("utf-8")
