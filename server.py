@@ -23,6 +23,13 @@ RSS_FEEDS = [
     # BBC: backup only, capped low.
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
+
+    # France 24 — international English news, AFP-quality images.
+    "https://www.france24.com/en/rss",
+    "https://www.france24.com/en/middle-east/rss",
+    "https://www.france24.com/en/americas/rss",
+    "https://www.france24.com/en/europe/rss",
+    "https://www.france24.com/en/africa/rss",
 ]
 
 SOURCE_PAGES = [
@@ -31,6 +38,7 @@ SOURCE_PAGES = [
     "https://www.theguardian.com/us-news",
     "https://www.theguardian.com/politics",
     "https://www.aljazeera.com/news/",
+    "https://www.france24.com/en/",
 ]
 
 
@@ -253,6 +261,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "03b31d2b27c92f1f3b9d859af311bdc32e1a5b1d",
     "a986591a5616e58ef4e969da4c262a7cd5ea966d",
     "b88185dfdfb96f9906fd85f7be019566c90544c9",
+    "3d1c142050b20ca18ed327ed36c5d09a84a61f8d",
+    "4c7168712c6d206d96b7ff78ac94bcb2958fe483",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -480,7 +490,7 @@ def extract_inline_images_from_html(html, base_url, max_images=35):
             if key in seen:
                 continue
             lower = img.lower()
-            if not any(token in lower for token in ["ichef.bbci", "cloudfront", "reuters", "guardian", "aljazeera", "apnews"]):
+            if not any(token in lower for token in ["ichef.bbci", "cloudfront", "reuters", "guardian", "aljazeera", "apnews", "france24"]):
                 continue
             seen.add(key)
             imgs.append(img)
@@ -618,6 +628,7 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "i.guim.co.uk",
             "aljazeera.net",
             "aljazeera.com",
+            "s.france24.com",
             ".jpg",
             ".jpeg",
             ".webp",
@@ -932,7 +943,7 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
 
     # Other sources (Al Jazeera) keep their existing feed/scrape order.
 
-    order = ["bbc", "guardian", "other"]
+    order = ["other", "bbc", "guardian"]
     queues = {name: list(buckets[name]) for name in order}
     mixed = []
     already = set()
