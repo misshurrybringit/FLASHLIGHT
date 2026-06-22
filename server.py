@@ -30,6 +30,10 @@ RSS_FEEDS = [
     "https://www.france24.com/en/europe/rss",
     "https://www.france24.com/en/africa/rss",
     "https://www.france24.com/en/asia-pacific/rss",
+
+    # NPR — world news feed.
+    "https://feeds.npr.org/1004/rss.xml",
+    "https://feeds.npr.org/1001/rss.xml",
 ]
 
 SOURCE_PAGES = [
@@ -266,6 +270,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "cf9a22baba3717df477614306e6da87bd7727226",
     "31a31cfa-6bc9-11f1-aa70-005056a97e36",
     "d2d1c8e2-6e1c-11f1-914d-005056a97e36",
+    "00e8a2ecccc606efdbeab5493a4a65b752cf9beb",
+    "9d7f0c052d5b5056ea7f75885737bc3437e696f9",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -350,6 +356,8 @@ def clean_extracted_image_url(url):
     # images with text/graphics overlaid — not clean news photos.
     if "france24.com" in lower and lower.endswith("-cs.jpg"):
         return None
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-"]):
+        return None
     # France 24 URLs contain a /w:NNN/ width parameter — reject small sizes
     # and upgrade larger ones to 1280px for better quality.
     if "france24.com" in url:
@@ -381,19 +389,35 @@ def clean_extracted_image_url(url):
         return None
     if "spiegel.de" in lower and lower.endswith(".png"):
         return None
-    # Reject NPR entirely — not a source anymore.
+    # NPR brightspotcdn — filter out podcast, games, music, and quiz images
+    # which are non-news assets; allow real news photos.
     if "brightspotcdn" in lower or "media.npr.org" in lower:
-        return None
+        if any(bad in lower for bad in [
+            "games-we-love", "podcast", "music", "puzzle", "quiz", "crossword",
+            "default-wide", "placeholder", "share-image", "shareimage",
+        ]):
+            return None
+        # NPR .png files are usually graphics, not photos
+        if lower.endswith(".png"):
+            return None
+        # Upgrade resolution
+        url = re.sub(r'resize/\d+x\d+', 'resize/1400x788', url)
     # BBC /images/ic/ URLs with programme IDs (p0...) are show/podcast assets, not news photos.
     if "bbci.co.uk/images/ic/" in lower and "/p0" in lower:
         return None
-    # Guardian: reject portrait crops by checking dimensions in URL path.
-    # Format: /hash/x_y_width_height/size.jpg — reject if height > width.
+    # Guardian: reject portrait crops and near-full-frame crops.
+    # Format: /hash/x_y_width_height/size.jpg
     if "media.guim.co.uk" in lower:
-        m = re.search(r'/\d+_\d+_(\d+)_(\d+)/', urllib.parse.urlparse(url).path)
+        m = re.search(r'/(\d+)_(\d+)_(\d+)_(\d+)/', urllib.parse.urlparse(url).path)
         if m:
-            crop_w, crop_h = int(m.group(1)), int(m.group(2))
+            x, y, crop_w, crop_h = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+            # Reject portrait crops.
             if crop_h > crop_w:
+                return None
+            # Reject near-full-frame crops (offset under 100px in both axes) —
+            # these tend to be stock/archival/generic photos rather than
+            # scene-specific news photography.
+            if x < 100 and y < 100:
                 return None
     return upgrade_bbc_image_url(url)
 
@@ -511,7 +535,7 @@ def extract_inline_images_from_html(html, base_url, max_images=35):
             if key in seen:
                 continue
             lower = img.lower()
-            if not any(token in lower for token in ["ichef.bbci", "cloudfront", "reuters", "guardian", "aljazeera", "apnews", "france24"]):
+            if not any(token in lower for token in ["ichef.bbci", "guardian", "aljazeera", "france24", "brightspotcdn"]):
                 continue
             seen.add(key)
             imgs.append(img)
@@ -643,13 +667,12 @@ def extract_image_urls_from_html(html, base_url, limit=80):
 
         if not any(good in lower for good in [
             "ichef.bbci.co.uk",
-            "static.reuters.com",
-            "cloudfront-us-east-2.images.arcpublishing.com",
             "media.guim.co.uk",
             "i.guim.co.uk",
             "aljazeera.net",
             "aljazeera.com",
             "s.france24.com",
+            "npr.brightspotcdn.com",
             ".jpg",
             ".jpeg",
             ".webp",
@@ -695,7 +718,6 @@ def extract_image_urls_from_html(html, base_url, limit=80):
 
     expanded = html_unescape_js_urls(html)
     url_patterns = [
-        r'https://cloudfront-us-east-2\.images\.arcpublishing\.com/[^"\'\s<>]+',
         r'https://media\.guim\.co\.uk/[^"\'\s<>]+',
     ]
     for pattern in url_patterns:
@@ -864,11 +886,9 @@ def is_bbc_feed_url(url):
 
 def source_category(url):
     lower = (url or "").lower()
-    if "reuters" in lower or "arcpublishing.com" in lower:
-        return "reuters"
     if "guim.co.uk" in lower or "theguardian" in lower:
         return "guardian"
-    if "aljazeera" in lower:
+    if "aljazeera" in lower or "france24" in lower or "brightspotcdn" in lower:
         return "other"
     if "bbci.co.uk" in lower or "bbc.co.uk" in lower:
         return "bbc"
@@ -929,11 +949,11 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         # stock/archival/evergreen photos. A meaningful offset (50px+) suggests
         # the image was cropped from a specific scene — more likely news photos.
         m = _re.search(r'/(\d+)_(\d+)_\d+_\d+/', img)
-        has_meaningful_offset = bool(m and (int(m.group(1)) >= 50 or int(m.group(2)) >= 50))
+        has_meaningful_offset = bool(m and (int(m.group(1)) >= 100 or int(m.group(2)) >= 100))
         is_zero_crop = not has_meaningful_offset
         # For API-fetched images, also deprioritize ones older than 2 days.
         # Scraped images have no date signal but are inherently fresh (live pages).
-        GUARDIAN_MAX_AGE_DAYS = 2
+        GUARDIAN_MAX_AGE_DAYS = 1
         is_old = False
         if is_from_api:
             pub_date = GUARDIAN_IMAGE_DATE.get(img, "")
@@ -947,7 +967,7 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
                     is_old = age_days > GUARDIAN_MAX_AGE_DAYS
                 except Exception:
                     pass
-        return (1 if is_from_api else 0, api_rank, 1 if is_old else 0, 1 if is_zero_crop else 0)
+        return (1 if is_from_api else 0, api_rank, 1 if is_old else 0)
     buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
 
     # BBC: sort by UUID-decoded age — newest first, images older than 2 days
@@ -2197,13 +2217,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/sources.json":
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            counts = {"bbc": 0, "reuters": 0, "guardian": 0, "other": 0}
+            counts = {"bbc": 0, "guardian": 0, "other": 0}
             for img in images:
                 lower = img.lower()
                 if "bbci.co.uk" in lower:
                     counts["bbc"] += 1
-                elif "reuters" in lower or "arcpublishing" in lower:
-                    counts["reuters"] += 1
                 elif "guim.co.uk" in lower or "theguardian" in lower:
                     counts["guardian"] += 1
                 else:
