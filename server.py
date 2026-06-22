@@ -49,6 +49,10 @@ SOURCE_PAGES = [
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
     "https://www.theguardian.com/politics",
+    "https://www.theguardian.com/global-development",
+    "https://www.theguardian.com/law",
+    "https://www.theguardian.com/society",
+    "https://www.theguardian.com/environment",
     "https://www.aljazeera.com/news/",
     "https://www.aljazeera.com/where/middle-east/",
     "https://www.aljazeera.com/where/africa/",
@@ -300,6 +304,14 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "76acff10-6d7b-11f1-a2ba-775ae811ce10",
     "ccff1ef8-c0b7-4dd3-bf0e-9b98ee86f672",
     "30742380-6e51-11f1-8c89-cfc50446b805",
+    "IMG_9701-1782142787",
+    "cbb03ddb-cbc4-41ac-8002-ab4975cef551",
+    "5a012522-64a6-11f1-9883-005056a90284",
+    "b01d2756-b2aa-460a-836d-5878468f97b9",
+    "f1fca7c0-6e42-11f1-b1db-af71d47507d6",
+    "5352d20b-415f-4b02-a401-34d6a39c0b6b",
+    "0f6dbd0a-1f62-4513-9a1f-c3a8e1367883",
+    "e1968e79-a02c-463a-9942-e5b287de3b70",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -410,7 +422,7 @@ def clean_extracted_image_url(url):
     # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, FR-2.jpg etc)
     if "france24.com" in lower and re.search(r'/[a-z]{2,4}-\d+(-\d+)?\.jpg$', lower):
         return None
-    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "-fmm-", "fmm-en", "fmm-fr", "fmm-ar", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "news_en", "news_fr", "news_ar"]):
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "-fmm-", "fmm-en", "fmm-fr", "fmm-ar", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "thumbnail", "news_en", "news_fr", "news_ar"]):
         return None
     # Also catch filenames ending in -EN.jpg, -FR.jpg, -AR.jpg (broadcast language tags)
     if "france24.com" in lower and re.search(r'-(en|fr|ar)\.jpg$', lower):
@@ -433,6 +445,16 @@ def clean_extracted_image_url(url):
         return None
     if "ytimg.com" in lower or "youtube.com" in lower:
         return None
+    # CBC: upgrade small Resize= values and reject tiny ones
+    if "i.cbc.ca" in lower or "cbcrc.ca" in lower:
+        resize_m = re.search(r'Resize%3D%28(\d+)%29', url) or re.search(r'Resize=\((\d+)\)', url)
+        if resize_m:
+            w = int(resize_m.group(1))
+            if w < 800:
+                # Try to upgrade to 1280
+                url = re.sub(r'Resize%3D%28\d+%29', 'Resize%3D%281280%29', url)
+                url = re.sub(r'Resize=\(\d+\)', 'Resize=(1280)', url)
+                lower = url.lower()
     # Reject sports and entertainment images by filename keywords.
     sports_entertainment_terms = [
         "nba", "nfl", "nhl", "mlb", "nascar", "soccer", "football", "basketball",
@@ -1027,10 +1049,30 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         "global-development": 1, "law": 1,
         "society": 2, "business": 2, "cities": 2,
     }
-    # Only use Guardian images scraped directly from section pages —
-    # API images tend to be older and more generic than editorially-chosen scraped ones.
-    buckets["guardian"] = [img for img in buckets["guardian"] if img not in GUARDIAN_IMAGE_SECTION]
-    buckets["guardian"] = sorted(buckets["guardian"], key=lambda img: img)
+    # Sort Guardian: scraped images first (editorially chosen, inherently fresh),
+    # then API images sorted by section priority and age.
+    section_rank = {
+        "world": 0, "us-news": 0, "politics": 0,
+        "global-development": 1, "law": 1,
+        "society": 2, "business": 2, "cities": 2,
+    }
+    def guardian_sort_key(img):
+        is_from_api = img in GUARDIAN_IMAGE_SECTION
+        api_rank = section_rank.get(GUARDIAN_IMAGE_SECTION.get(img, ""), 3)
+        GUARDIAN_MAX_AGE_DAYS = 1
+        is_old = False
+        if is_from_api:
+            pub_date = GUARDIAN_IMAGE_DATE.get(img, "")
+            if pub_date:
+                try:
+                    import datetime as _dt
+                    pub_ts = _dt.datetime.strptime(pub_date[:19], "%Y-%m-%dT%H:%M:%S").replace(
+                        tzinfo=_dt.timezone.utc).timestamp()
+                    is_old = (time.time() - pub_ts) / 86400 > GUARDIAN_MAX_AGE_DAYS
+                except Exception:
+                    pass
+        return (1 if is_from_api else 0, api_rank, 1 if is_old else 0)
+    buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
 
     # BBC: sort by UUID-decoded age — newest first, images older than 2 days
     # pushed to the back of the BBC bucket so they don't crowd out fresh content.
@@ -1045,7 +1087,7 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     buckets["bbc"] = sorted(buckets["bbc"], key=bbc_sort_key)
 
     # France 24: same UUID age-based sorting, 2-day cutoff.
-    MAX_F24_AGE_DAYS = 2
+    MAX_F24_AGE_DAYS = 1
     def f24_sort_key(url):
         age = bbc_uuid_age_days(url)
         if age is None:
@@ -1404,7 +1446,9 @@ def _pre_vet_one(url):
                 return
             APPROVED_URLS.add(url)
         except Exception:
-            APPROVED_URLS.add(url)
+            # Fetch failed (CDN blocking pre-vet) — don't auto-approve.
+            # Leave unapproved so the proxy-time cv2 check still runs.
+            pass
         return
     # Guardian and BBC — run full cv2 checks.
     try:
@@ -2397,6 +2441,7 @@ class Handler(BaseHTTPRequestHandler):
                 if url in APPROVED_URLS:
                     is_guardian = "guim.co.uk" in url or "theguardian.com" in url
                     is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
+                    is_scmp = "i-scmp" in url.lower()
                     if not is_guardian and not is_bbc and url not in APPROVED_VERTICAL_URLS:
                         try:
                             arr = np.frombuffer(data, np.uint8)
@@ -2409,13 +2454,24 @@ class Handler(BaseHTTPRequestHandler):
                                         self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
                                         return
                                     APPROVED_VERTICAL_URLS.add(url)
+                                # For SCMP, also run graphic and sharpness checks
+                                if is_scmp:
+                                    if image_is_probably_full_graphic_page(data) or image_has_center_divider(data):
+                                        REJECT_CACHE[url] = {"time": time.time()}
+                                        self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
+                                        return
+                                    gray = cv2.cvtColor(img_check, cv2.COLOR_BGR2GRAY)
+                                    if float(cv2.Laplacian(gray, cv2.CV_64F).var()) < 80:
+                                        REJECT_CACHE[url] = {"time": time.time()}
+                                        self.safe_send_bytes(415, b"Rejected low sharpness", extra_headers={"Cache-Control": "no-store"})
+                                        return
                         except Exception:
                             pass
                     PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
                     self.safe_send_bytes(200, data, content_type, {"Cache-Control": "public, max-age=300"})
                     return
 
-                # Not yet vetted — size check only, no cv2 content filtering.
+                # Not yet vetted — size check + graphic detection for known sources.
                 try:
                     arr = np.frombuffer(data, np.uint8)
                     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -2434,6 +2490,25 @@ class Handler(BaseHTTPRequestHandler):
                                 self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
                                 return
                             APPROVED_VERTICAL_URLS.add(url)
+                        # Run graphic-page detection for sources whose pre-vet fetch
+                        # may have failed (Al Jazeera, SCMP, France24 CDN blocks).
+                        _is_aj = "aljazeera" in url.lower()
+                        _is_scmp = "i-scmp" in url.lower()
+                        _is_f24 = "france24" in url.lower()
+                        if _is_aj or _is_scmp or _is_f24:
+                            if image_is_probably_full_graphic_page(data) or image_has_center_divider(data):
+                                REJECT_CACHE[url] = {"time": time.time()}
+                                self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
+                                return
+                            # Sharpness check for SCMP — reject genuinely blurry/grainy images
+                            # (some SCMP images are low-quality wire photos upscaled to 1280x720)
+                            if _is_scmp:
+                                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                                laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+                                if laplacian_var < 80:
+                                    REJECT_CACHE[url] = {"time": time.time()}
+                                    self.safe_send_bytes(415, b"Rejected low sharpness", extra_headers={"Cache-Control": "no-store"})
+                                    return
                         cropped, did_crop = crop_top_if_needed(img, url)
                         if cropped is not None and cropped.size > 0:
                             ok, encoded = cv2.imencode(".jpg", cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 98])
