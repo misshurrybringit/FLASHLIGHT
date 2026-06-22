@@ -24,12 +24,12 @@ RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://feeds.bbci.co.uk/news/rss.xml",
 
-    # France 24 — international English news, AFP-quality images.
-    "https://www.france24.com/en/rss",
+    # France 24 — international feeds only, no French national news.
     "https://www.france24.com/en/middle-east/rss",
     "https://www.france24.com/en/americas/rss",
     "https://www.france24.com/en/europe/rss",
     "https://www.france24.com/en/africa/rss",
+    "https://www.france24.com/en/asia-pacific/rss",
 ]
 
 SOURCE_PAGES = [
@@ -263,6 +263,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "b88185dfdfb96f9906fd85f7be019566c90544c9",
     "3d1c142050b20ca18ed327ed36c5d09a84a61f8d",
     "4c7168712c6d206d96b7ff78ac94bcb2958fe483",
+    "cf9a22baba3717df477614306e6da87bd7727226",
+    "31a31cfa-6bc9-11f1-aa70-005056a97e36",
+    "d2d1c8e2-6e1c-11f1-914d-005056a97e36",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -343,6 +346,21 @@ def clean_extracted_image_url(url):
         fit_match = re.search(r'fit=(\d+)%2c(\d+)', lower)
         if fit_match and (int(fit_match.group(1)) < 200 or int(fit_match.group(2)) < 200):
             return None
+    # France 24 filenames ending in -CS.jpg are broadcast graphics/composite
+    # images with text/graphics overlaid — not clean news photos.
+    if "france24.com" in lower and lower.endswith("-cs.jpg"):
+        return None
+    # France 24 URLs contain a /w:NNN/ width parameter — reject small sizes
+    # and upgrade larger ones to 1280px for better quality.
+    if "france24.com" in url:
+        w_match = re.search(r'/w:(\d+)/', url)
+        if w_match:
+            w = int(w_match.group(1))
+            if w < 400:
+                return None
+            # Upgrade to 1280 width for better quality
+            url = re.sub(r'/w:\d+/', '/w:1280/', url)
+            lower = url.lower()
     # Reject SVG and GIF files.
     if lower.endswith(".svg") or ".svg?" in lower:
         return None
@@ -462,6 +480,9 @@ def extract_article_links_from_html(html, base_url, max_links=40):
             continue
         lower = link.lower()
         if any(skip in lower for skip in ["/video/", "/podcast", "/live", "signin", "subscribe", "login"]):
+            continue
+        # Skip France 24 French national news section
+        if "france24.com" in lower and "/en/france/" in lower:
             continue
         seen.add(link)
         links.append(link)
@@ -929,19 +950,32 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         return (1 if is_from_api else 0, api_rank, 1 if is_old else 0, 1 if is_zero_crop else 0)
     buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
 
-    # BBC: sort by UUID-decoded age — newest first, images older than 3 days
+    # BBC: sort by UUID-decoded age — newest first, images older than 2 days
     # pushed to the back of the BBC bucket so they don't crowd out fresh content.
     BBC_MAX_AGE_DAYS = 2
     def bbc_sort_key(url):
         age = bbc_uuid_age_days(url)
         if age is None:
-            return (0, 0)  # unknown age — treat as fresh
+            return (0, 0)
         if age > BBC_MAX_AGE_DAYS:
-            return (1, age)  # old — push to back, oldest last
-        return (0, age)  # recent — sort newest first within fresh bucket
+            return (1, age)
+        return (0, age)
     buckets["bbc"] = sorted(buckets["bbc"], key=bbc_sort_key)
 
-    # Other sources (Al Jazeera) keep their existing feed/scrape order.
+    # "Other" bucket (Al Jazeera + France 24): France 24 uses the same UUIDv1
+    # format as BBC, so apply age-based sorting there too. Al Jazeera URLs
+    # don't contain UUIDs so they'll be treated as fresh (age=None → front).
+    MAX_OTHER_AGE_DAYS = 2
+    def other_sort_key(url):
+        age = bbc_uuid_age_days(url)  # works for any UUIDv1 URL
+        if age is None:
+            return (0, 0)  # Al Jazeera — no UUID, treat as fresh
+        if age > MAX_OTHER_AGE_DAYS:
+            return (1, age)
+        return (0, age)
+    buckets["other"] = sorted(buckets["other"], key=other_sort_key)
+
+    # Guardian: existing sort already handles age via GUARDIAN_IMAGE_DATE.
 
     order = ["other", "bbc", "guardian"]
     queues = {name: list(buckets[name]) for name in order}
