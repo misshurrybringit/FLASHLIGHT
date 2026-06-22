@@ -280,6 +280,11 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "VORONEZH-RUSSIA-1000x562-1782131876",
     "7f55a627cb463145d860af987aa8e28af2da3a43",
     "c9852750-6e28-11f1-8e1d-bbbb1017d210",
+    "Pattni",
+    "cd0153f0-6e63-11f1-8546-8f19e4fe30f4",
+    "76ee748f407ab07b21706772d56f",
+    "image-1781726961",
+    "image-1781611733",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -354,6 +359,12 @@ def clean_extracted_image_url(url):
     # Al Jazeera PNG files are always graphics/overlays, not news photos.
     if "aljazeera.com" in lower and (lower.endswith(".png") or ".png?" in lower):
         return None
+    # Al Jazeera WordPress URLs include upload year in path (/2023/03/) —
+    # reject anything older than last year to filter stale archival images.
+    if "aljazeera.com" in lower:
+        year_match = re.search(r'/wp-content/uploads/(\d{4})/', lower)
+        if year_match and int(year_match.group(1)) < 2025:
+            return None
     # Al Jazeera also serves small UI label/badge graphics (e.g. "Post-Label",
     # "Breaking-Label") that aren't photos at all, plus tiny fit= dimensions
     # that confirm a non-photo asset.
@@ -364,7 +375,7 @@ def clean_extracted_image_url(url):
         if fit_match and (int(fit_match.group(1)) < 200 or int(fit_match.group(2)) < 200):
             return None
         resize_match = re.search(r'resize=(\d+)%2c(\d+)', lower)
-        if resize_match and int(resize_match.group(1)) < 600:
+        if resize_match and int(resize_match.group(1)) < 750:
             return None
         # Filenames with embedded dimensions (e.g. "image-1000x562.jpg") are
         # pre-sized graphic assets, not raw photos.
@@ -377,7 +388,7 @@ def clean_extracted_image_url(url):
     # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, FR-2.jpg etc)
     if "france24.com" in lower and re.search(r'/[a-z]{2,4}-\d+(-\d+)?\.jpg$', lower):
         return None
-    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "1280x720px", "1280x720-", "1920x1080px", "1920x1080-", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social"]):
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "1280x720px", "1280x720-", "1920x1080px", "1920x1080-", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette"]):
         return None
     # France 24 URLs contain a /w:NNN/ width parameter — reject small sizes
     # and upgrade larger ones to 1280px for better quality.
@@ -427,6 +438,10 @@ def clean_extracted_image_url(url):
         # Reject forced-aspect distorted resizes (e.g. resize/1800x101!) — tiny height
         forced_resize = re.search(r'resize/(\d+)x(\d+)!', lower)
         if forced_resize and int(forced_resize.group(2)) < 200:
+            return None
+        # Reject absurdly large resize widths (>5000px) — malformed/broken URLs
+        large_resize = re.search(r'resize/(\d+)x', lower)
+        if large_resize and int(large_resize.group(1)) > 5000:
             return None
         # Upgrade resolution — handle both resize/NNN and resize/NNNxMMM formats
         url = re.sub(r'resize/\d+x\d+!?', 'resize/1400x788', url)
