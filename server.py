@@ -285,6 +285,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "76ee748f407ab07b21706772d56f",
     "image-1781726961",
     "image-1781611733",
+    "86ca4870-6e0d-11f1-8546-8f19e4fe30f4",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -384,6 +385,9 @@ def clean_extracted_image_url(url):
     # France 24 filenames ending in -CS.jpg are broadcast graphics/composite
     # images with text/graphics overlaid — not clean news photos.
     if "france24.com" in lower and (re.search(r'-cs\d*\.jpg$', lower) or lower.endswith("-cs.jpg")):
+        return None
+    # France 24 PNG files are always graphics, not news photos.
+    if "france24.com" in lower and (lower.endswith(".png") or ".png?" in lower):
         return None
     # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, FR-2.jpg etc)
     if "france24.com" in lower and re.search(r'/[a-z]{2,4}-\d+(-\d+)?\.jpg$', lower):
