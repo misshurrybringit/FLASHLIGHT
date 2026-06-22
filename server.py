@@ -244,6 +244,15 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "image-1782060560",
     "48cc8790-6bf1-11f1-b1db-af71d47507d6",
     "image-1782053254",
+    "349c0fd155396d27a63304946d6c679eab8161b2",
+    "d5e431a0-6e35-11f1-8546-8f19e4fe30f4",
+    "image-1782128484",
+    "e785ef90-69ce-11f1-84fd-21e83c1eab66",
+    "b849f2c145d90891839dadff9b76ee9d555a0ba4",
+    "IMG-20250912-WA0000-1757829229",
+    "03b31d2b27c92f1f3b9d859af311bdc32e1a5b1d",
+    "a986591a5616e58ef4e969da4c262a7cd5ea966d",
+    "b88185dfdfb96f9906fd85f7be019566c90544c9",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -834,6 +843,27 @@ def source_category(url):
     return "other"
 
 
+def bbc_uuid_age_days(url):
+    """Decode a BBC UUIDv1 image URL and return the image's age in days.
+    Returns None if the URL doesn't contain a decodable UUID.
+    BBC image filenames contain UUIDv1 values whose time fields encode a
+    60-bit timestamp in 100-nanosecond intervals since Oct 15, 1582.
+    """
+    m = re.search(r'([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-', url)
+    if not m:
+        return None
+    try:
+        time_low = int(m.group(1), 16)
+        time_mid = int(m.group(2), 16)
+        time_hi  = int(m.group(3), 16) & 0x0FFF
+        timestamp_100ns = (time_hi << 48) | (time_mid << 32) | time_low
+        uuid_epoch_offset = 0x01b21dd213814000
+        unix_seconds = (timestamp_100ns - uuid_epoch_offset) / 1e7
+        return (time.time() - unix_seconds) / 86400
+    except Exception:
+        return None
+
+
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     """Interleave Guardian/BBC/Al Jazeera, one at a time, no per-source caps.
 
@@ -858,8 +888,47 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     def guardian_sort_key(img):
         is_from_api = img in GUARDIAN_IMAGE_SECTION
         api_rank = section_rank.get(GUARDIAN_IMAGE_SECTION.get(img, ""), 3)
-        return (1 if is_from_api else 0, api_rank)
+        # Guardian images with a 0_0_ crop (no x/y offset) tend to be
+        # stock/archival/evergreen photos. Non-zero offsets suggest the image
+        # was cropped from a specific scene — more likely to be news photos.
+        # Penalize 0_0_ crops by sorting them after offset-cropped images.
+        import re as _re
+        # Guardian images with a small or zero x/y crop offset tend to be
+        # stock/archival/evergreen photos. A meaningful offset (50px+) suggests
+        # the image was cropped from a specific scene — more likely news photos.
+        m = _re.search(r'/(\d+)_(\d+)_\d+_\d+/', img)
+        has_meaningful_offset = bool(m and (int(m.group(1)) >= 50 or int(m.group(2)) >= 50))
+        is_zero_crop = not has_meaningful_offset
+        # For API-fetched images, also deprioritize ones older than 2 days.
+        # Scraped images have no date signal but are inherently fresh (live pages).
+        GUARDIAN_MAX_AGE_DAYS = 2
+        is_old = False
+        if is_from_api:
+            pub_date = GUARDIAN_IMAGE_DATE.get(img, "")
+            if pub_date:
+                try:
+                    import datetime as _dt
+                    # webPublicationDate format: "2026-06-20T14:30:00Z"
+                    pub_ts = _dt.datetime.strptime(pub_date[:19], "%Y-%m-%dT%H:%M:%S").replace(
+                        tzinfo=_dt.timezone.utc).timestamp()
+                    age_days = (time.time() - pub_ts) / 86400
+                    is_old = age_days > GUARDIAN_MAX_AGE_DAYS
+                except Exception:
+                    pass
+        return (1 if is_from_api else 0, api_rank, 1 if is_old else 0, 1 if is_zero_crop else 0)
     buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
+
+    # BBC: sort by UUID-decoded age — newest first, images older than 3 days
+    # pushed to the back of the BBC bucket so they don't crowd out fresh content.
+    BBC_MAX_AGE_DAYS = 2
+    def bbc_sort_key(url):
+        age = bbc_uuid_age_days(url)
+        if age is None:
+            return (0, 0)  # unknown age — treat as fresh
+        if age > BBC_MAX_AGE_DAYS:
+            return (1, age)  # old — push to back, oldest last
+        return (0, age)  # recent — sort newest first within fresh bucket
+    buckets["bbc"] = sorted(buckets["bbc"], key=bbc_sort_key)
 
     # Other sources (Al Jazeera) keep their existing feed/scrape order.
 
