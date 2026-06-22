@@ -272,6 +272,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "d2d1c8e2-6e1c-11f1-914d-005056a97e36",
     "00e8a2ecccc606efdbeab5493a4a65b752cf9beb",
     "9d7f0c052d5b5056ea7f75885737bc3437e696f9",
+    "image-1782140464",
+    "2866b514-5a78-11f1-a386-005056a90284",
+    "VORONEZH-RUSSIA-1000x562-1782131876",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -352,11 +355,18 @@ def clean_extracted_image_url(url):
         fit_match = re.search(r'fit=(\d+)%2c(\d+)', lower)
         if fit_match and (int(fit_match.group(1)) < 200 or int(fit_match.group(2)) < 200):
             return None
+        resize_match = re.search(r'resize=(\d+)%2c(\d+)', lower)
+        if resize_match and int(resize_match.group(1)) < MIN_IMAGE_WIDTH:
+            return None
+        # Filenames with embedded dimensions (e.g. "image-1000x562.jpg") are
+        # pre-sized graphic assets, not raw photos.
+        if re.search(r'-\d+x\d+-\d+\.', lower):
+            return None
     # France 24 filenames ending in -CS.jpg are broadcast graphics/composite
     # images with text/graphics overlaid — not clean news photos.
     if "france24.com" in lower and lower.endswith("-cs.jpg"):
         return None
-    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-"]):
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-"]):
         return None
     # France 24 URLs contain a /w:NNN/ width parameter — reject small sizes
     # and upgrade larger ones to 1280px for better quality.
@@ -400,8 +410,13 @@ def clean_extracted_image_url(url):
         # NPR .png files are usually graphics, not photos
         if lower.endswith(".png"):
             return None
-        # Upgrade resolution
+        # Reject staff/byline headshots — these are photographer/journalist
+        # portraits, not news images (typically square crops in the URL).
+        if "crop/" in lower and re.search(r'crop/(\d+)x\1', lower):  # square crop
+            return None
+        # Upgrade resolution — handle both resize/NNN and resize/NNNxMMM formats
         url = re.sub(r'resize/\d+x\d+', 'resize/1400x788', url)
+        url = re.sub(r'resize/\d+(?!x)', 'resize/1400', url)
     # BBC /images/ic/ URLs with programme IDs (p0...) are show/podcast assets, not news photos.
     if "bbci.co.uk/images/ic/" in lower and "/p0" in lower:
         return None
