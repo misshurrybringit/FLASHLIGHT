@@ -31,18 +31,14 @@ RSS_FEEDS = [
     "https://www.france24.com/en/africa/rss",
     "https://www.france24.com/en/asia-pacific/rss",
 
-    # CGTN — China's international broadcaster, global news coverage.
-    "https://www.cgtn.com/subscribe/rss/world.xml",
-    "https://www.cgtn.com/subscribe/rss/politics.xml",
+    # CGTN — blocked or returns no images from Render's IPs.
 
     # South China Morning Post — Hong Kong English-language, world + Asia coverage.
     "https://www.scmp.com/rss/5/feed",
     "https://www.scmp.com/rss/4/feed",
 
-    # Deutsche Welle — Germany's international broadcaster, strong Eastern Europe coverage.
-    "https://rss.dw.com/rdf/rss-en-all",
-
-    # CBC Canada — Canadian public broadcaster, world news section.
+    # Deutsche Welle — blocked by Cloudflare from Render's IPs.
+    # CBC Canada — working, 19 images.
     "https://www.cbc.ca/webfeed/rss/rss-world",
 
     # Mexico News Daily — blocked by Cloudflare from Render's IPs.
@@ -1031,44 +1027,10 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         "global-development": 1, "law": 1,
         "society": 2, "business": 2, "cities": 2,
     }
-    def guardian_sort_key(img):
-        is_from_api = img in GUARDIAN_IMAGE_SECTION
-        api_rank = section_rank.get(GUARDIAN_IMAGE_SECTION.get(img, ""), 3)
-        # Guardian images with a 0_0_ crop (no x/y offset) tend to be
-        # stock/archival/evergreen photos. Non-zero offsets suggest the image
-        # was cropped from a specific scene — more likely to be news photos.
-        # Penalize 0_0_ crops by sorting them after offset-cropped images.
-        import re as _re
-        # Guardian images with a small or zero x/y crop offset tend to be
-        # stock/archival/evergreen photos. A meaningful offset (50px+) suggests
-        # the image was cropped from a specific scene — more likely news photos.
-        m = _re.search(r'/(\d+)_(\d+)_\d+_\d+/', img)
-        # A meaningful x-offset (100px+) strongly suggests a horizontal scene crop.
-        # A y-only offset (e.g. 0_566) can be a vertical slice from a tall image —
-        # require at least 100px x-offset, or both x and y to be non-trivial.
-        has_meaningful_offset = bool(m and (
-            int(m.group(1)) >= 100 or
-            (int(m.group(1)) >= 50 and int(m.group(2)) >= 100)
-        ))
-        is_zero_crop = not has_meaningful_offset
-        # For API-fetched images, also deprioritize ones older than 2 days.
-        # Scraped images have no date signal but are inherently fresh (live pages).
-        GUARDIAN_MAX_AGE_DAYS = 1
-        is_old = False
-        if is_from_api:
-            pub_date = GUARDIAN_IMAGE_DATE.get(img, "")
-            if pub_date:
-                try:
-                    import datetime as _dt
-                    # webPublicationDate format: "2026-06-20T14:30:00Z"
-                    pub_ts = _dt.datetime.strptime(pub_date[:19], "%Y-%m-%dT%H:%M:%S").replace(
-                        tzinfo=_dt.timezone.utc).timestamp()
-                    age_days = (time.time() - pub_ts) / 86400
-                    is_old = age_days > GUARDIAN_MAX_AGE_DAYS
-                except Exception:
-                    pass
-        return (1 if is_from_api else 0, api_rank, 1 if is_old else 0)
-    buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
+    # Only use Guardian images scraped directly from section pages —
+    # API images tend to be older and more generic than editorially-chosen scraped ones.
+    buckets["guardian"] = [img for img in buckets["guardian"] if img not in GUARDIAN_IMAGE_SECTION]
+    buckets["guardian"] = sorted(buckets["guardian"], key=lambda img: img)
 
     # BBC: sort by UUID-decoded age — newest first, images older than 2 days
     # pushed to the back of the BBC bucket so they don't crowd out fresh content.
@@ -1182,6 +1144,7 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             is_guardian_feed = "theguardian.com" in feed_url
             item_limit = 750 if is_bbc else 90
             found_imgs = 0
+            is_aljazeera_feed = "aljazeera.com" in feed_url
             for item in items[:item_limit]:
                 # Skip BBC items from sections we don't want
                 if is_bbc:
@@ -1190,6 +1153,15 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                     if any(s in link_url for s in [
                         "/technology/", "/tech/", "/sport/", "/entertainment/",
                         "/culture/", "/travel/", "/food/", "/science/",
+                    ]):
+                        continue
+                # Skip Al Jazeera tech/science/sport/culture items
+                if is_aljazeera_feed:
+                    link_el = item.find("link")
+                    link_url = (link_el.text or "") if link_el is not None else ""
+                    if any(s in link_url for s in [
+                        "/technology/", "/science/", "/sport/", "/arts-and-culture/",
+                        "/economy/", "/climate-crisis/",
                     ]):
                         continue
                 img = extract_rss_item_image(item)
