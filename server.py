@@ -39,8 +39,8 @@ RSS_FEEDS = [
     "https://www.scmp.com/rss/5/feed",
     "https://www.scmp.com/rss/4/feed",
 
-    # Mercopress — independent English-language South American news agency.
-    "https://en.mercopress.com/rss",
+    # Mexico News Daily — English-language Mexico news, WordPress CDN images.
+    "https://mexiconewsdaily.com/feed",
 ]
 
 SOURCE_PAGES = [
@@ -297,6 +297,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "0c1e7cd6-69a8-11f1-a995-005056bfb2b6",
     "3c55cc7e-245e-4a29-a845-1d462fa0e9f4",
     "76acff10-6d7b-11f1-a2ba-775ae811ce10",
+    "ccff1ef8-c0b7-4dd3-bf0e-9b98ee86f672",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -323,6 +324,10 @@ def url_needs_voice_crop(url):
 def upgrade_bbc_image_url(url):
     if not url:
         return url
+    # Mercopress images are cached at small sizes (e.g. /600x315/) —
+    # try upgrading to a larger cached size.
+    if "mercopress.com" in url:
+        url = re.sub(r'/\d+x\d+/', '/1280x720/', url)
     url = url.replace("/240/", "/2048/")
     url = url.replace("/320/", "/2048/")
     url = url.replace("/480/", "/2048/")
@@ -594,7 +599,7 @@ def extract_inline_images_from_html(html, base_url, max_images=35):
             if key in seen:
                 continue
             lower = img.lower()
-            if not any(token in lower for token in ["ichef.bbci", "guardian", "aljazeera", "france24", "brightspotcdn", "cgtn", "i-scmp", "mercopress"]):
+            if not any(token in lower for token in ["ichef.bbci", "guardian", "aljazeera", "france24", "brightspotcdn", "cgtn", "i-scmp", "mexiconewsdaily"]):
                 continue
             seen.add(key)
             imgs.append(img)
@@ -735,7 +740,7 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "img.cgtn.com",
             "img.i-scmp.com",
             "cdn.i-scmp.com",
-            "mercopress.com",
+            "mexiconewsdaily.com",
             "npr.brightspotcdn.com",
             ".jpg",
             ".jpeg",
@@ -952,7 +957,7 @@ def source_category(url):
     lower = (url or "").lower()
     if "guim.co.uk" in lower or "theguardian" in lower:
         return "guardian"
-    if "aljazeera" in lower or "france24" in lower or "brightspotcdn" in lower or "cgtn" in lower or "i-scmp" in lower or "scmp" in lower or "mercopress" in lower:
+    if "aljazeera" in lower or "france24" in lower or "brightspotcdn" in lower or "cgtn" in lower or "i-scmp" in lower or "scmp" in lower or "mexiconewsdaily" in lower:
         return "other"
     if "bbci.co.uk" in lower or "bbc.co.uk" in lower:
         return "bbc"
@@ -1000,7 +1005,7 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
             buckets["aljazeera"].append(img)
         elif "france24" in lower:
             buckets["france24"].append(img)
-        elif any(t in lower for t in ["mercopress", "i-scmp", "scmp", "cgtn"]):
+        elif any(t in lower for t in ["mexiconewsdaily", "i-scmp", "scmp", "cgtn"]):
             buckets["international"].append(img)
         else:
             buckets["other"].append(img)
@@ -2341,7 +2346,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/sources.json":
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            counts = {"bbc": 0, "guardian": 0, "aljazeera": 0, "france24": 0, "cgtn": 0, "scmp": 0, "mercopress": 0, "other": 0}
+            counts = {"bbc": 0, "guardian": 0, "aljazeera": 0, "france24": 0, "cgtn": 0, "scmp": 0, "mexico": 0, "other": 0}
             for img in images:
                 lower = img.lower()
                 if "bbci.co.uk" in lower:
@@ -2356,8 +2361,8 @@ class Handler(BaseHTTPRequestHandler):
                     counts["cgtn"] += 1
                 elif "i-scmp" in lower or "scmp" in lower:
                     counts["scmp"] += 1
-                elif "mercopress" in lower:
-                    counts["mercopress"] += 1
+                elif "mexiconewsdaily" in lower:
+                    counts["mexico"] += 1
                 else:
                     counts["other"] += 1
             data = json.dumps({"total": len(images), "counts": counts, "sample": images[:40]}, indent=2).encode("utf-8")
