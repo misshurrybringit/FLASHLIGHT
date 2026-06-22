@@ -278,6 +278,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "image-1782140464",
     "2866b514-5a78-11f1-a386-005056a90284",
     "VORONEZH-RUSSIA-1000x562-1782131876",
+    "7f55a627cb463145d860af987aa8e28af2da3a43",
+    "c9852750-6e28-11f1-8e1d-bbbb1017d210",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -349,6 +351,9 @@ def clean_extracted_image_url(url):
     # resized larger — reject these rather than show a blurry upscale.
     if "aljazeera.com" in lower and "thumb" in lower:
         return None
+    # Al Jazeera PNG files are always graphics/overlays, not news photos.
+    if "aljazeera.com" in lower and (lower.endswith(".png") or ".png?" in lower):
+        return None
     # Al Jazeera also serves small UI label/badge graphics (e.g. "Post-Label",
     # "Breaking-Label") that aren't photos at all, plus tiny fit= dimensions
     # that confirm a non-photo asset.
@@ -367,9 +372,12 @@ def clean_extracted_image_url(url):
             return None
     # France 24 filenames ending in -CS.jpg are broadcast graphics/composite
     # images with text/graphics overlaid — not clean news photos.
-    if "france24.com" in lower and lower.endswith("-cs.jpg"):
+    if "france24.com" in lower and (re.search(r'-cs\d*\.jpg$', lower) or lower.endswith("-cs.jpg")):
         return None
-    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "france-m%c3%a9dias", "france-medias", "1280x720px", "1920x1080px"]):
+    # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, FR-2.jpg etc)
+    if "france24.com" in lower and re.search(r'/[a-z]{2,4}-\d+(-\d+)?\.jpg$', lower):
+        return None
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "1280x720px", "1280x720-", "1920x1080px", "1920x1080-", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social"]):
         return None
     # France 24 URLs contain a /w:NNN/ width parameter — reject small sizes
     # and upgrade larger ones to 1280px for better quality.
@@ -946,10 +954,19 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
     API's raw "newest article in section" results, which don't carry any
     signal about how prominently a story is actually being featured.
     """
-    buckets = {"guardian": [], "bbc": [], "other": []}
+    buckets = {"guardian": [], "bbc": [], "aljazeera": [], "france24": [], "other": []}
     for img in images:
-        cat = source_category(img)
-        buckets.setdefault(cat if cat in buckets else "other", []).append(img)
+        lower = img.lower()
+        if "guim.co.uk" in lower or "theguardian" in lower:
+            buckets["guardian"].append(img)
+        elif "bbci.co.uk" in lower or "bbc.co.uk" in lower:
+            buckets["bbc"].append(img)
+        elif "aljazeera" in lower:
+            buckets["aljazeera"].append(img)
+        elif "france24" in lower:
+            buckets["france24"].append(img)
+        else:
+            buckets["other"].append(img)
 
     # Guardian: scraped (editorially featured) images first, then API images
     # sorted by section priority tier within that.
@@ -970,7 +987,13 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         # stock/archival/evergreen photos. A meaningful offset (50px+) suggests
         # the image was cropped from a specific scene — more likely news photos.
         m = _re.search(r'/(\d+)_(\d+)_\d+_\d+/', img)
-        has_meaningful_offset = bool(m and (int(m.group(1)) >= 100 or int(m.group(2)) >= 100))
+        # A meaningful x-offset (100px+) strongly suggests a horizontal scene crop.
+        # A y-only offset (e.g. 0_566) can be a vertical slice from a tall image —
+        # require at least 100px x-offset, or both x and y to be non-trivial.
+        has_meaningful_offset = bool(m and (
+            int(m.group(1)) >= 100 or
+            (int(m.group(1)) >= 50 and int(m.group(2)) >= 100)
+        ))
         is_zero_crop = not has_meaningful_offset
         # For API-fetched images, also deprioritize ones older than 2 days.
         # Scraped images have no date signal but are inherently fresh (live pages).
@@ -1003,22 +1026,22 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         return (0, age)
     buckets["bbc"] = sorted(buckets["bbc"], key=bbc_sort_key)
 
-    # "Other" bucket (Al Jazeera + France 24): France 24 uses the same UUIDv1
-    # format as BBC, so apply age-based sorting there too. Al Jazeera URLs
-    # don't contain UUIDs so they'll be treated as fresh (age=None → front).
-    MAX_OTHER_AGE_DAYS = 2
-    def other_sort_key(url):
-        age = bbc_uuid_age_days(url)  # works for any UUIDv1 URL
+    # France 24: same UUID age-based sorting, 2-day cutoff.
+    MAX_F24_AGE_DAYS = 2
+    def f24_sort_key(url):
+        age = bbc_uuid_age_days(url)
         if age is None:
-            return (0, 0)  # Al Jazeera — no UUID, treat as fresh
-        if age > MAX_OTHER_AGE_DAYS:
+            return (0, 0)
+        if age > MAX_F24_AGE_DAYS:
             return (1, age)
         return (0, age)
-    buckets["other"] = sorted(buckets["other"], key=other_sort_key)
+    buckets["france24"] = sorted(buckets["france24"], key=f24_sort_key)
 
+    # Al Jazeera: no UUID timestamps, keep feed/scrape order (already fresh).
     # Guardian: existing sort already handles age via GUARDIAN_IMAGE_DATE.
 
-    order = ["other", "bbc", "guardian"]
+    # Interleave: Al Jazeera first (most current), then BBC, France 24, Guardian.
+    order = ["aljazeera", "bbc", "france24", "guardian", "other"]
     queues = {name: list(buckets[name]) for name in order}
     mixed = []
     already = set()
@@ -1735,11 +1758,20 @@ def image_has_center_divider(data):
 def render_html():
     with IMAGE_CACHE["lock"]:
         cached = IMAGE_CACHE["images"][:]
-    # Seed with the front of the already-relevance-ordered pool, regardless of
-    # source, so the very first thing the user sees on page load feels current.
-    seed = [img for img in cached
-            if not url_is_known_bad(img)
-            and img not in REJECT_CACHE][:10]
+    clean = [img for img in cached
+             if not url_is_known_bad(img)
+             and img not in REJECT_CACHE]
+    # Seed with the most current sources first — Al Jazeera and France 24
+    # pull from live pages so their images feel most immediately relevant.
+    # Fill remainder from BBC and Guardian.
+    other = [img for img in clean if "aljazeera" in img.lower() or "france24" in img.lower()][:5]
+    bbc = [img for img in clean if "bbci.co.uk" in img.lower()][:3]
+    guardian = [img for img in clean if "guim.co.uk" in img.lower()][:4]
+    seed = (other + bbc + guardian)[:10]
+    # If not enough from priority sources, fill from the general pool
+    if len(seed) < 10:
+        seen = set(seed)
+        seed += [img for img in clean if img not in seen][:10 - len(seed)]
     sequence = []
     for img in seed:
         src = "/proxy?url=" + urllib.parse.quote(img, safe="")
