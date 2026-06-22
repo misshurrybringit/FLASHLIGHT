@@ -31,9 +31,13 @@ RSS_FEEDS = [
     "https://www.france24.com/en/africa/rss",
     "https://www.france24.com/en/asia-pacific/rss",
 
-    # NPR — world news feed.
-    "https://feeds.npr.org/1004/rss.xml",
-    "https://feeds.npr.org/1001/rss.xml",
+    # CGTN — China's international broadcaster, global news coverage.
+    "https://www.cgtn.com/subscribe/rss/world.xml",
+    "https://www.cgtn.com/subscribe/rss/politics.xml",
+
+    # South China Morning Post — Hong Kong English-language, world + Asia coverage.
+    "https://www.scmp.com/rss/5/feed",
+    "https://www.scmp.com/rss/4/feed",
 ]
 
 SOURCE_PAGES = [
@@ -286,6 +290,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "image-1781726961",
     "image-1781611733",
     "86ca4870-6e0d-11f1-8546-8f19e4fe30f4",
+    "d79b2b10-6e22-11f1-8546-8f19e4fe30f4",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -583,7 +588,7 @@ def extract_inline_images_from_html(html, base_url, max_images=35):
             if key in seen:
                 continue
             lower = img.lower()
-            if not any(token in lower for token in ["ichef.bbci", "guardian", "aljazeera", "france24", "brightspotcdn"]):
+            if not any(token in lower for token in ["ichef.bbci", "guardian", "aljazeera", "france24", "brightspotcdn", "cgtn", "i-scmp"]):
                 continue
             seen.add(key)
             imgs.append(img)
@@ -720,6 +725,10 @@ def extract_image_urls_from_html(html, base_url, limit=80):
             "aljazeera.net",
             "aljazeera.com",
             "s.france24.com",
+            "news.cgtn.com",
+            "img.cgtn.com",
+            "img.i-scmp.com",
+            "cdn.i-scmp.com",
             "npr.brightspotcdn.com",
             ".jpg",
             ".jpeg",
@@ -936,7 +945,7 @@ def source_category(url):
     lower = (url or "").lower()
     if "guim.co.uk" in lower or "theguardian" in lower:
         return "guardian"
-    if "aljazeera" in lower or "france24" in lower or "brightspotcdn" in lower:
+    if "aljazeera" in lower or "france24" in lower or "brightspotcdn" in lower or "cgtn" in lower or "i-scmp" in lower or "scmp" in lower:
         return "other"
     if "bbci.co.uk" in lower or "bbc.co.uk" in lower:
         return "bbc"
@@ -1360,13 +1369,29 @@ def _pre_vet_one(url):
         return
     is_guardian = "guim.co.uk" in url or "theguardian.com" in url
     is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
-    if not is_guardian and not is_bbc:
-        # Non-Guardian/BBC sources (Al Jazeera etc) are auto-approved —
-        # vertical/ratio checking happens at proxy-serve time when the image
-        # is actually fetched for a user request.
+    is_aljazeera = "aljazeera" in url.lower()
+    if not is_guardian and not is_bbc and not is_aljazeera:
+        # Other sources (France 24, NPR) are auto-approved —
+        # vertical/ratio checking happens at proxy-serve time.
         APPROVED_URLS.add(url)
         return
-    # Guardian and BBC — run cv2 checks.
+    if is_aljazeera:
+        # Al Jazeera: run graphic-page detection only (no portrait/divider checks).
+        # Fetch is lightweight since Al Jazeera's CDN is generally accessible.
+        try:
+            data, content_type = fetch_bytes(url, timeout=8)
+            if not content_type.startswith("image/"):
+                REJECT_CACHE[url] = {"time": time.time()}
+                return
+            if image_is_probably_full_graphic_page(data):
+                REJECT_CACHE[url] = {"time": time.time()}
+                return
+            APPROVED_URLS.add(url)
+        except Exception:
+            # If fetch fails, auto-approve rather than silently drop
+            APPROVED_URLS.add(url)
+        return
+    # Guardian and BBC — run full cv2 checks.
     try:
         data, content_type = fetch_bytes(url, timeout=8)
         if not content_type.startswith("image/"):
@@ -1405,12 +1430,9 @@ def _pre_vet_one(url):
         if not is_bbc and image_is_portrait_or_generic_isolated_subject(data, allow_vertical=(ih > iw * 1.4)):
             REJECT_CACHE[url] = {"time": time.time()}
             return
-        # The graphic-page check (designed to catch infographics/charts) flags
-        # large flat color regions — blue sky, water, white clothing/buildings
-        # are extremely common in real outdoor news photos and were causing
-        # heavy false-positive rejection of legitimate BBC photos. Skip it for
-        # BBC; the center-divider check below still catches composite images.
-        if not is_bbc and image_is_probably_full_graphic_page(data):
+        # Re-enabled for BBC with strict=True — uses higher thresholds to avoid
+        # false positives on blue sky / white clothing in real outdoor photos.
+        if image_is_probably_full_graphic_page(data, strict=is_bbc):
             REJECT_CACHE[url] = {"time": time.time()}
             return
         if image_has_center_divider(data):
@@ -1437,7 +1459,10 @@ def _pre_vet_pool(images):
     print(f"[BG] Pre-vet done. Approved: {len(APPROVED_URLS)}", flush=True)
 
 
-def image_is_probably_full_graphic_page(data):
+def image_is_probably_full_graphic_page(data, strict=False):
+    """Detect full-page infographics/charts. strict=True uses higher thresholds
+    for sources (like BBC) where outdoor photos with blue sky commonly trigger
+    the standard blue/white detection."""
     try:
         arr = np.frombuffer(data, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -1463,18 +1488,30 @@ def image_is_probably_full_graphic_page(data):
     blue_frac = float(np.mean(blue_mask))
     green_frac = float(np.mean(green_mask))
     white_frac = float(np.mean(white_mask))
-    if blue_frac > 0.22 and white_frac > 0.025:
-        return True
-    if green_frac > 0.018 and white_frac > 0.025 and edge_density > 0.055:
-        return True
-    if blue_frac > 0.14 and green_frac > 0.006 and white_frac > 0.018:
-        return True
-    if unique_colors < 1100 and edge_density > 0.075 and gray_std < 62:
-        return True
-    if unique_colors < 750 and mean_brightness > 65:
-        return True
-    if gray_std < 36 and edge_density > 0.07:
-        return True
+    if strict:
+        # Stricter thresholds for BBC — require larger fractions and all three
+        # channels together, so blue sky + white clouds doesn't trigger.
+        if blue_frac > 0.35 and white_frac > 0.08 and edge_density > 0.06:
+            return True
+        if green_frac > 0.05 and white_frac > 0.05 and edge_density > 0.08:
+            return True
+        if unique_colors < 600 and edge_density > 0.09 and gray_std < 50:
+            return True
+        if gray_std < 28 and edge_density > 0.09:
+            return True
+    else:
+        if blue_frac > 0.22 and white_frac > 0.025:
+            return True
+        if green_frac > 0.018 and white_frac > 0.025 and edge_density > 0.055:
+            return True
+        if blue_frac > 0.14 and green_frac > 0.006 and white_frac > 0.018:
+            return True
+        if unique_colors < 1100 and edge_density > 0.075 and gray_std < 62:
+            return True
+        if unique_colors < 750 and mean_brightness > 65:
+            return True
+        if gray_std < 36 and edge_density > 0.07:
+            return True
     return False
 
 
@@ -2289,7 +2326,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/sources.json":
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
-            counts = {"bbc": 0, "guardian": 0, "aljazeera": 0, "france24": 0, "npr": 0, "other": 0}
+            counts = {"bbc": 0, "guardian": 0, "aljazeera": 0, "france24": 0, "cgtn": 0, "scmp": 0, "other": 0}
             for img in images:
                 lower = img.lower()
                 if "bbci.co.uk" in lower:
@@ -2300,8 +2337,10 @@ class Handler(BaseHTTPRequestHandler):
                     counts["aljazeera"] += 1
                 elif "france24" in lower:
                     counts["france24"] += 1
-                elif "brightspotcdn" in lower:
-                    counts["npr"] += 1
+                elif "cgtn" in lower:
+                    counts["cgtn"] += 1
+                elif "i-scmp" in lower or "scmp" in lower:
+                    counts["scmp"] += 1
                 else:
                     counts["other"] += 1
             data = json.dumps({"total": len(images), "counts": counts, "sample": images[:40]}, indent=2).encode("utf-8")
