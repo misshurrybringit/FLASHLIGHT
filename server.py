@@ -312,6 +312,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "5352d20b-415f-4b02-a401-34d6a39c0b6b",
     "0f6dbd0a-1f62-4513-9a1f-c3a8e1367883",
     "e1968e79-a02c-463a-9942-e5b287de3b70",
+    "d88f5710-6dca-11f1-8546-8f19e4fe30f4",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -600,6 +601,12 @@ def extract_article_links_from_html(html, base_url, max_links=40):
             continue
         # Skip France 24 French national news section
         if "france24.com" in lower and "/en/france/" in lower:
+            continue
+        # Skip Al Jazeera tech/science/sport/culture sections
+        if "aljazeera.com" in lower and any(s in lower for s in [
+            "/technology/", "/science/", "/sport/", "/arts-and-culture/",
+            "/economy/", "/climate-crisis/", "/features/",
+        ]):
             continue
         seen.add(link)
         links.append(link)
@@ -1909,7 +1916,7 @@ def render_html():
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{
-  display: block;
+  display: none;
   position: fixed;
   bottom: 12px;
   left: 50%;
