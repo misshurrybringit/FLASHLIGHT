@@ -313,6 +313,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "0f6dbd0a-1f62-4513-9a1f-c3a8e1367883",
     "e1968e79-a02c-463a-9942-e5b287de3b70",
     "d88f5710-6dca-11f1-8546-8f19e4fe30f4",
+    "5619ce28-7c62-4d46-8675-df81ac83b401",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1433,12 +1434,13 @@ def _pre_vet_one(url):
     is_aljazeera = "aljazeera" in url.lower()
     is_scmp = "i-scmp.com" in url.lower() or "scmp.com" in url.lower()
     is_france24 = "france24.com" in url.lower()
-    if not is_guardian and not is_bbc and not is_aljazeera and not is_scmp and not is_france24:
-        # Other sources (CGTN etc) are auto-approved —
+    is_cbc = "i.cbc.ca" in url.lower() or "cbcrc.ca" in url.lower()
+    if not is_guardian and not is_bbc and not is_aljazeera and not is_scmp and not is_france24 and not is_cbc:
+        # Other sources are auto-approved —
         # vertical/ratio checking happens at proxy-serve time.
         APPROVED_URLS.add(url)
         return
-    if is_aljazeera or is_scmp or is_france24:
+    if is_aljazeera or is_scmp or is_france24 or is_cbc:
         # Run graphic-page detection only (no portrait/divider checks).
         try:
             data, content_type = fetch_bytes(url, timeout=8)
@@ -1883,17 +1885,10 @@ def render_html():
     clean = [img for img in cached
              if not url_is_known_bad(img)
              and img not in REJECT_CACHE]
-    # Seed with the most current sources first — Al Jazeera and France 24
-    # pull from live pages so their images feel most immediately relevant.
-    # Fill remainder from BBC and Guardian.
-    other = [img for img in clean if "aljazeera" in img.lower() or "france24" in img.lower()][:5]
-    bbc = [img for img in clean if "bbci.co.uk" in img.lower()][:3]
-    guardian = [img for img in clean if "guim.co.uk" in img.lower()][:4]
-    seed = (other + bbc + guardian)[:10]
-    # If not enough from priority sources, fill from the general pool
-    if len(seed) < 10:
-        seen = set(seed)
-        seed += [img for img in clean if img not in seen][:10 - len(seed)]
+    # The pool is already interleaved and sorted by freshness per source
+    # (Al Jazeera → BBC → France 24 → international → Guardian).
+    # Just take the first 10 — they're already the most relevant.
+    seed = clean[:10]
     sequence = []
     for img in seed:
         src = "/proxy?url=" + urllib.parse.quote(img, safe="")
@@ -2502,7 +2497,8 @@ class Handler(BaseHTTPRequestHandler):
                         _is_aj = "aljazeera" in url.lower()
                         _is_scmp = "i-scmp" in url.lower()
                         _is_f24 = "france24" in url.lower()
-                        if _is_aj or _is_scmp or _is_f24:
+                        _is_cbc = "i.cbc.ca" in url.lower()
+                        if _is_aj or _is_scmp or _is_f24 or _is_cbc:
                             if image_is_probably_full_graphic_page(data) or image_has_center_divider(data):
                                 REJECT_CACHE[url] = {"time": time.time()}
                                 self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
