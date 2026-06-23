@@ -314,6 +314,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "e1968e79-a02c-463a-9942-e5b287de3b70",
     "d88f5710-6dca-11f1-8546-8f19e4fe30f4",
     "5619ce28-7c62-4d46-8675-df81ac83b401",
+    "2cba3e70-6ec2-11f1-8e1d-bbbb1017d210",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1896,7 +1897,7 @@ def render_html():
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{
-  display: block;
+  display: none;
   position: fixed;
   bottom: 12px;
   left: 50%;
