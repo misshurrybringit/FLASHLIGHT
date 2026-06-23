@@ -1026,34 +1026,36 @@ def bbc_uuid_age_days(url):
 
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Sort all images by actual freshness — newest first, regardless of source.
-
-    Uses decoded UUID timestamps for BBC/France24/SCMP, webPublicationDate for
-    Guardian API images, and treats scraped Al Jazeera/Guardian/CBC as fresh.
+    """Sort images by freshness (newest first) with a max-2-consecutive-per-source
+    rule to ensure variety even when one source dominates the fresh content.
     """
     import datetime as _dt
 
+    def image_source(url):
+        lower = url.lower()
+        if "bbci.co.uk" in lower or "bbc.co.uk" in lower: return "bbc"
+        if "guim.co.uk" in lower or "theguardian" in lower: return "guardian"
+        if "aljazeera" in lower: return "aljazeera"
+        if "france24" in lower: return "france24"
+        if "i-scmp" in lower or "scmp" in lower: return "scmp"
+        if "i.cbc.ca" in lower or "cbcrc" in lower: return "cbc"
+        return "other"
+
     def image_timestamp(url):
-        """Return Unix timestamp of image. Higher = newer."""
-        # BBC, France 24, SCMP — UUIDv1 timestamp
         age_days = bbc_uuid_age_days(url)
         if age_days is not None:
             return time.time() - (age_days * 86400)
-        # Guardian API images
         if url in GUARDIAN_IMAGE_DATE:
             try:
                 return _dt.datetime.strptime(GUARDIAN_IMAGE_DATE[url][:19], "%Y-%m-%dT%H:%M:%S").replace(
                     tzinfo=_dt.timezone.utc).timestamp()
             except Exception:
                 pass
-        # Scraped sources (Al Jazeera, Guardian scraped, CBC) — treat as very fresh
-        # since they come from live pages refreshed every 2 minutes.
         lower = url.lower()
         if "aljazeera" in lower or "i.cbc.ca" in lower:
-            return time.time() - 1800  # ~30 min ago
+            return time.time() - 1800
         if "guim.co.uk" in lower and url not in GUARDIAN_IMAGE_SECTION:
-            return time.time() - 3600  # scraped Guardian ~1hr ago
-        # Everything else — treat as 2hrs old
+            return time.time() - 3600
         return time.time() - 7200
 
     # Deduplicate
@@ -1065,7 +1067,30 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
             seen.add(key)
             deduped.append(img)
 
-    return sorted(deduped, key=image_timestamp, reverse=True)[:limit]
+    # Sort globally by freshness
+    sorted_imgs = sorted(deduped, key=image_timestamp, reverse=True)
+
+    # Re-order so no more than 2 consecutive images are from the same source.
+    result = []
+    remaining = list(sorted_imgs)
+    last_sources = []
+
+    while remaining and len(result) < limit:
+        placed = False
+        for i, img in enumerate(remaining):
+            src = image_source(img)
+            if last_sources[-2:].count(src) < 2:
+                result.append(img)
+                last_sources.append(src)
+                remaining.pop(i)
+                placed = True
+                break
+        if not placed:
+            # All remaining are same source — just take next
+            result.append(remaining.pop(0))
+            last_sources.append(image_source(result[-1]))
+
+    return result
 
 
 def get_bbc_images(limit=MAX_IMAGE_POOL):
@@ -1073,7 +1098,6 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
     with IMAGE_CACHE["lock"]:
         if IMAGE_CACHE["images"] and now - IMAGE_CACHE["time"] < CACHE_SECONDS:
             cached = IMAGE_CACHE["images"][:]
-            random.shuffle(cached)
             return cached[:limit]
 
     images = []
@@ -1872,7 +1896,7 @@ def render_html():
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{
-  display: none;
+  display: block;
   position: fixed;
   bottom: 12px;
   left: 50%;
