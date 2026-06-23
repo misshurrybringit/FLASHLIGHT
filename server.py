@@ -1043,9 +1043,11 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
         return "other"
 
     def image_timestamp(url):
+        # BBC, France 24, SCMP — exact UUIDv1 timestamp
         age_days = bbc_uuid_age_days(url)
         if age_days is not None:
             return time.time() - (age_days * 86400)
+        # Guardian — use API date if available (covers both API and some scraped)
         if url in GUARDIAN_IMAGE_DATE:
             try:
                 return _dt.datetime.strptime(GUARDIAN_IMAGE_DATE[url][:19], "%Y-%m-%dT%H:%M:%S").replace(
@@ -1053,10 +1055,23 @@ def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
             except Exception:
                 pass
         lower = url.lower()
-        if "aljazeera" in lower or "i.cbc.ca" in lower:
-            return time.time() - 1800
-        if "guim.co.uk" in lower and url not in GUARDIAN_IMAGE_SECTION:
+        # Al Jazeera — extract upload date from WordPress URL path (/2026/06/22/)
+        if "aljazeera" in lower:
+            m = re.search(r'/wp-content/uploads/(\d{4})/(\d{2})/(\d{2})/', lower)
+            if m:
+                try:
+                    pub_ts = _dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                                         tzinfo=_dt.timezone.utc).timestamp()
+                    return pub_ts
+                except Exception:
+                    pass
+            return time.time() - 3600  # fallback: assume 1hr old
+        # CBC — no timestamp signal, assume moderately fresh
+        if "i.cbc.ca" in lower:
             return time.time() - 3600
+        # Guardian scraped (no API date) — assume same-day but not brand new
+        if "guim.co.uk" in lower:
+            return time.time() - 7200
         return time.time() - 7200
 
     # Deduplicate
@@ -1853,24 +1868,34 @@ def render_html():
              and img not in REJECT_CACHE]
 
     def image_age_seconds(url):
-        """Return estimated age in seconds. Lower = newer. Unknown = 3600 (1hr)."""
-        # BBC and France 24: decode UUID timestamp
+        """Return estimated age in seconds. Lower = newer."""
+        import datetime as _dt
         age_days = bbc_uuid_age_days(url)
         if age_days is not None:
             return age_days * 86400
-        # Guardian API images: use webPublicationDate
         if url in GUARDIAN_IMAGE_DATE:
             try:
-                import datetime as _dt
                 pub_ts = _dt.datetime.strptime(GUARDIAN_IMAGE_DATE[url][:19], "%Y-%m-%dT%H:%M:%S").replace(
                     tzinfo=_dt.timezone.utc).timestamp()
                 return time.time() - pub_ts
             except Exception:
                 pass
-        # Al Jazeera scraped, Guardian scraped, CBC — no timestamp, treat as fresh
-        if "aljazeera" in url.lower() or "i.cbc.ca" in url.lower():
-            return 1800  # assume ~30 mins old
-        return 3600  # default 1hr
+        lower = url.lower()
+        if "aljazeera" in lower:
+            m = re.search(r'/wp-content/uploads/(\d{4})/(\d{2})/(\d{2})/', lower)
+            if m:
+                try:
+                    pub_ts = _dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                                         tzinfo=_dt.timezone.utc).timestamp()
+                    return time.time() - pub_ts
+                except Exception:
+                    pass
+            return 3600
+        if "i.cbc.ca" in lower:
+            return 3600
+        if "guim.co.uk" in lower:
+            return 7200
+        return 7200
 
     # Take top candidates from the pool and sort by actual freshness
     candidates = clean[:60]
