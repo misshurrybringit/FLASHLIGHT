@@ -2067,10 +2067,8 @@ function refillPool() {{
   candidates = [...new Set(candidates)];
 
   let fresh = candidates.filter(src => !_shownThisCycle.has(src));
-  // Only reset the cycle once truly exhausted — use a proportion of the
-  // candidate pool rather than a fixed low number, so with a large pool
-  // we don't reset prematurely.
-  if (fresh.length < Math.max(15, candidates.length * 0.1)) {{
+  // Only reset when genuinely exhausted — don't reset early or images repeat.
+  if (fresh.length < 3) {{
     _shownThisCycle.clear();
     fresh = candidates;
   }}
