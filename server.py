@@ -1026,105 +1026,46 @@ def bbc_uuid_age_days(url):
 
 
 def weighted_image_mix(images, limit=MAX_IMAGE_POOL):
-    """Interleave Guardian/BBC/Al Jazeera, one at a time, no per-source caps.
+    """Sort all images by actual freshness — newest first, regardless of source.
 
-    Guardian images scraped directly from theguardian.com section pages
-    reflect real editorial choices (what Guardian's own editors are actually
-    featuring right now) and are prioritized ahead of images sourced from the
-    API's raw "newest article in section" results, which don't carry any
-    signal about how prominently a story is actually being featured.
+    Uses decoded UUID timestamps for BBC/France24/SCMP, webPublicationDate for
+    Guardian API images, and treats scraped Al Jazeera/Guardian/CBC as fresh.
     """
-    buckets = {"guardian": [], "bbc": [], "aljazeera": [], "france24": [], "international": [], "other": []}
+    import datetime as _dt
+
+    def image_timestamp(url):
+        """Return Unix timestamp of image. Higher = newer."""
+        # BBC, France 24, SCMP — UUIDv1 timestamp
+        age_days = bbc_uuid_age_days(url)
+        if age_days is not None:
+            return time.time() - (age_days * 86400)
+        # Guardian API images
+        if url in GUARDIAN_IMAGE_DATE:
+            try:
+                return _dt.datetime.strptime(GUARDIAN_IMAGE_DATE[url][:19], "%Y-%m-%dT%H:%M:%S").replace(
+                    tzinfo=_dt.timezone.utc).timestamp()
+            except Exception:
+                pass
+        # Scraped sources (Al Jazeera, Guardian scraped, CBC) — treat as very fresh
+        # since they come from live pages refreshed every 2 minutes.
+        lower = url.lower()
+        if "aljazeera" in lower or "i.cbc.ca" in lower:
+            return time.time() - 1800  # ~30 min ago
+        if "guim.co.uk" in lower and url not in GUARDIAN_IMAGE_SECTION:
+            return time.time() - 3600  # scraped Guardian ~1hr ago
+        # Everything else — treat as 2hrs old
+        return time.time() - 7200
+
+    # Deduplicate
+    seen = set()
+    deduped = []
     for img in images:
-        lower = img.lower()
-        if "guim.co.uk" in lower or "theguardian" in lower:
-            buckets["guardian"].append(img)
-        elif "bbci.co.uk" in lower or "bbc.co.uk" in lower:
-            buckets["bbc"].append(img)
-        elif "aljazeera" in lower:
-            buckets["aljazeera"].append(img)
-        elif "france24" in lower:
-            buckets["france24"].append(img)
-        elif any(t in lower for t in ["mexiconewsdaily", "i-scmp", "scmp", "cgtn", "static.dw", "i.cbc"]):
-            buckets["international"].append(img)
-        else:
-            buckets["other"].append(img)
+        key = canonical_image_key(img)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(img)
 
-    # Guardian: scraped (editorially featured) images first, then API images
-    # sorted by section priority tier within that.
-    section_rank = {
-        "world": 0, "us-news": 0, "politics": 0,
-        "global-development": 1, "law": 1,
-        "society": 2, "business": 2, "cities": 2,
-    }
-    # Sort Guardian: scraped images first (editorially chosen, inherently fresh),
-    # then API images sorted by section priority and age.
-    section_rank = {
-        "world": 0, "us-news": 0, "politics": 0,
-        "global-development": 1, "law": 1,
-        "society": 2, "business": 2, "cities": 2,
-    }
-    def guardian_sort_key(img):
-        is_from_api = img in GUARDIAN_IMAGE_SECTION
-        api_rank = section_rank.get(GUARDIAN_IMAGE_SECTION.get(img, ""), 3)
-        GUARDIAN_MAX_AGE_DAYS = 1
-        is_old = False
-        if is_from_api:
-            pub_date = GUARDIAN_IMAGE_DATE.get(img, "")
-            if pub_date:
-                try:
-                    import datetime as _dt
-                    pub_ts = _dt.datetime.strptime(pub_date[:19], "%Y-%m-%dT%H:%M:%S").replace(
-                        tzinfo=_dt.timezone.utc).timestamp()
-                    is_old = (time.time() - pub_ts) / 86400 > GUARDIAN_MAX_AGE_DAYS
-                except Exception:
-                    pass
-        return (1 if is_from_api else 0, api_rank, 1 if is_old else 0)
-    buckets["guardian"] = sorted(buckets["guardian"], key=guardian_sort_key)
-
-    # BBC: sort by UUID-decoded age — newest first, images older than 2 days
-    # pushed to the back of the BBC bucket so they don't crowd out fresh content.
-    BBC_MAX_AGE_DAYS = 2
-    def bbc_sort_key(url):
-        age = bbc_uuid_age_days(url)
-        if age is None:
-            return (0, 0)
-        if age > BBC_MAX_AGE_DAYS:
-            return (1, age)
-        return (0, age)
-    buckets["bbc"] = sorted(buckets["bbc"], key=bbc_sort_key)
-
-    # France 24: same UUID age-based sorting, 2-day cutoff.
-    MAX_F24_AGE_DAYS = 1
-    def f24_sort_key(url):
-        age = bbc_uuid_age_days(url)
-        if age is None:
-            return (0, 0)
-        if age > MAX_F24_AGE_DAYS:
-            return (1, age)
-        return (0, age)
-    buckets["france24"] = sorted(buckets["france24"], key=f24_sort_key)
-
-    # International (SCMP/CGTN/Mercopress): apply same age sort where UUIDs exist.
-    buckets["international"] = sorted(buckets["international"], key=f24_sort_key)
-
-    # Al Jazeera: no UUID timestamps, keep feed/scrape order (already fresh).
-    # Guardian: existing sort already handles age via GUARDIAN_IMAGE_DATE.
-
-    # Interleave: Al Jazeera first (most current), then BBC, France 24, Guardian.
-    order = ["aljazeera", "bbc", "france24", "international", "guardian", "other"]
-    queues = {name: list(buckets[name]) for name in order}
-    mixed = []
-    already = set()
-    while any(queues[name] for name in order):
-        for name in order:
-            if queues[name]:
-                img = queues[name].pop(0)
-                key = canonical_image_key(img)
-                if key not in already:
-                    already.add(key)
-                    mixed.append(img)
-    return mixed[:limit]
+    return sorted(deduped, key=image_timestamp, reverse=True)[:limit]
 
 
 def get_bbc_images(limit=MAX_IMAGE_POOL):
@@ -1885,10 +1826,30 @@ def render_html():
     clean = [img for img in cached
              if not url_is_known_bad(img)
              and img not in REJECT_CACHE]
-    # The pool is already interleaved and sorted by freshness per source
-    # (Al Jazeera → BBC → France 24 → international → Guardian).
-    # Just take the first 10 — they're already the most relevant.
-    seed = clean[:10]
+
+    def image_age_seconds(url):
+        """Return estimated age in seconds. Lower = newer. Unknown = 3600 (1hr)."""
+        # BBC and France 24: decode UUID timestamp
+        age_days = bbc_uuid_age_days(url)
+        if age_days is not None:
+            return age_days * 86400
+        # Guardian API images: use webPublicationDate
+        if url in GUARDIAN_IMAGE_DATE:
+            try:
+                import datetime as _dt
+                pub_ts = _dt.datetime.strptime(GUARDIAN_IMAGE_DATE[url][:19], "%Y-%m-%dT%H:%M:%S").replace(
+                    tzinfo=_dt.timezone.utc).timestamp()
+                return time.time() - pub_ts
+            except Exception:
+                pass
+        # Al Jazeera scraped, Guardian scraped, CBC — no timestamp, treat as fresh
+        if "aljazeera" in url.lower() or "i.cbc.ca" in url.lower():
+            return 1800  # assume ~30 mins old
+        return 3600  # default 1hr
+
+    # Take top candidates from the pool and sort by actual freshness
+    candidates = clean[:60]
+    seed = sorted(candidates, key=image_age_seconds)[:10]
     sequence = []
     for img in seed:
         src = "/proxy?url=" + urllib.parse.quote(img, safe="")
