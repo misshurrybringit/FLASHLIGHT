@@ -315,6 +315,11 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "d88f5710-6dca-11f1-8546-8f19e4fe30f4",
     "5619ce28-7c62-4d46-8675-df81ac83b401",
     "2cba3e70-6ec2-11f1-8e1d-bbbb1017d210",
+    "efd8f892-718d-11f1-bf82-005056a97e36",
+    "638d53fb17f4382512f8a335204cb99e8749b610",
+    "5b881c5d-d89d-4e55-a3f7-74c9ec81c11a",
+    "image00002-1782318053",
+    "3543438e-719c-11f1-b3ec-005056bf30b7",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -409,7 +414,7 @@ def clean_extracted_image_url(url):
         if fit_match and (int(fit_match.group(1)) < 200 or int(fit_match.group(2)) < 200):
             return None
         resize_match = re.search(r'resize=(\d+)%2c(\d+)', lower)
-        if resize_match and int(resize_match.group(1)) < 750:
+        if resize_match and int(resize_match.group(1)) < 800:
             return None
         # Filenames with embedded dimensions (e.g. "image-1000x562.jpg") are
         # pre-sized graphic assets, not raw photos.
@@ -792,6 +797,8 @@ def extract_image_urls_from_html(html, base_url, limit=80):
         if "yimg.com" in lower and (";w=80;" in lower or ";h=60;" in lower or "logo" in lower):
             return False
         if "static.theguardian.com" in lower:
+            return False
+        if "jobs.theguardian.com" in lower:
             return False
         if "interactive.guim.co.uk" in lower:
             return False
@@ -1922,7 +1929,7 @@ def render_html():
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{
-  display: block;
+  display: none;
   position: fixed;
   bottom: 12px;
   left: 50%;
