@@ -320,6 +320,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "5b881c5d-d89d-4e55-a3f7-74c9ec81c11a",
     "image00002-1782318053",
     "3543438e-719c-11f1-b3ec-005056bf30b7",
+    "96818070-8d68-11f0-9cf6-cbf3e73ce2b9",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -476,6 +477,12 @@ def clean_extracted_image_url(url):
     # BBC photos are always .jpg — .png from BBC is always a graphic/illustration.
     if "bbci.co.uk" in lower and lower.endswith(".png"):
         return None
+    # Hard age cutoff for BBC — reject images older than 7 days at collection time
+    # so they never enter the pool regardless of sort order or client shuffling.
+    if "bbci.co.uk" in lower:
+        age = bbc_uuid_age_days(url)
+        if age is not None and age > 7:
+            return None
     if "spiegel.de" in lower and lower.endswith(".png"):
         return None
     # NPR brightspotcdn — filter out podcast, games, music, and quiz images
@@ -1929,7 +1936,7 @@ def render_html():
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{
-  display: block;
+  display: none;
   position: fixed;
   bottom: 12px;
   left: 50%;
