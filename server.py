@@ -128,6 +128,16 @@ def fetch_guardian_api_images(limit=200):
                 if not img_url:
                     continue
                 pub_date = item.get("webPublicationDate", "")
+                # Skip Guardian API articles older than 30 days
+                if pub_date:
+                    try:
+                        import datetime as _dt
+                        pub_ts = _dt.datetime.strptime(pub_date[:19], "%Y-%m-%dT%H:%M:%S").replace(
+                            tzinfo=_dt.timezone.utc).timestamp()
+                        if (time.time() - pub_ts) / 86400 > 30:
+                            continue
+                    except Exception:
+                        pass
                 # Guardian main field returns HTML — extract the src URL.
                 src_match = re.search(r'src="([^"]+)"', img_url)
                 if src_match:
@@ -321,6 +331,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "image00002-1782318053",
     "3543438e-719c-11f1-b3ec-005056bf30b7",
     "96818070-8d68-11f0-9cf6-cbf3e73ce2b9",
+    "a4cf463a-70e3-11f1-b99c-005056bf30b7",
+    "image-1778852411",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -400,11 +412,24 @@ def clean_extracted_image_url(url):
     if "aljazeera.com" in lower and (lower.endswith(".png") or ".png?" in lower):
         return None
     # Al Jazeera WordPress URLs include upload year in path (/2023/03/) —
-    # reject anything older than last year to filter stale archival images.
+    # Reject Al Jazeera images older than 30 days using the WordPress URL date.
     if "aljazeera.com" in lower:
-        year_match = re.search(r'/wp-content/uploads/(\d{4})/', lower)
-        if year_match and int(year_match.group(1)) < 2025:
-            return None
+        date_match = re.search(r'/wp-content/uploads/(\d{4})/(\d{2})/(\d{2})/', lower)
+        if date_match:
+            import datetime as _dt
+            try:
+                pub_date = _dt.datetime(int(date_match.group(1)), int(date_match.group(2)), int(date_match.group(3)),
+                                        tzinfo=_dt.timezone.utc)
+                age_days = (time.time() - pub_date.timestamp()) / 86400
+                if age_days > 30:
+                    return None
+            except Exception:
+                pass
+        else:
+            # No date in URL — check year only
+            year_match = re.search(r'/wp-content/uploads/(\d{4})/', lower)
+            if year_match and int(year_match.group(1)) < 2025:
+                return None
     # Al Jazeera also serves small UI label/badge graphics (e.g. "Post-Label",
     # "Breaking-Label") that aren't photos at all, plus tiny fit= dimensions
     # that confirm a non-photo asset.
@@ -477,11 +502,19 @@ def clean_extracted_image_url(url):
     # BBC photos are always .jpg — .png from BBC is always a graphic/illustration.
     if "bbci.co.uk" in lower and lower.endswith(".png"):
         return None
-    # Hard age cutoff for BBC — reject images older than 7 days at collection time
-    # so they never enter the pool regardless of sort order or client shuffling.
+    # Hard age cutoffs at collection time — images older than these thresholds
+    # are rejected entirely so they never enter the pool.
     if "bbci.co.uk" in lower:
         age = bbc_uuid_age_days(url)
         if age is not None and age > 7:
+            return None
+    if "france24.com" in lower:
+        age = bbc_uuid_age_days(url)  # France 24 also uses UUIDv1
+        if age is not None and age > 7:
+            return None
+    if "i-scmp.com" in lower or "cdn.i-scmp.com" in lower:
+        age = bbc_uuid_age_days(url)  # SCMP also uses UUIDv1 in filenames
+        if age is not None and age > 14:
             return None
     if "spiegel.de" in lower and lower.endswith(".png"):
         return None
