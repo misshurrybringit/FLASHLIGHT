@@ -334,6 +334,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "a4cf463a-70e3-11f1-b99c-005056bf30b7",
     "image-1778852411",
     "image-1782674411",
+    "4640960b-7b2c-4f60-addc-0718a06a0548",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1970,7 +1971,7 @@ def render_html():
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{
-  display: none;
+  display: block;
   position: fixed;
   bottom: 12px;
   left: 50%;
@@ -2513,16 +2514,26 @@ class Handler(BaseHTTPRequestHandler):
                                         self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
                                         return
                                     APPROVED_VERTICAL_URLS.add(url)
-                                # For SCMP, also run graphic and sharpness checks
+                                # For SCMP, also run graphic, sharpness, and illustration checks
                                 if is_scmp:
                                     if image_is_probably_full_graphic_page(data) or image_has_center_divider(data):
                                         REJECT_CACHE[url] = {"time": time.time()}
                                         self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                                         return
                                     gray = cv2.cvtColor(img_check, cv2.COLOR_BGR2GRAY)
-                                    if float(cv2.Laplacian(gray, cv2.CV_64F).var()) < 80:
+                                    lap = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+                                    if lap < 80:
                                         REJECT_CACHE[url] = {"time": time.time()}
                                         self.safe_send_bytes(415, b"Rejected low sharpness", extra_headers={"Cache-Control": "no-store"})
+                                        return
+                                    # Illustration/cartoon detection — sample at 200x112 for better
+                                    # color palette accuracy. Real photos have thousands of colors;
+                                    # drawings/cartoons use a limited palette.
+                                    sample = cv2.resize(img_check, (200, 112), interpolation=cv2.INTER_AREA)
+                                    unique_colors = len(np.unique(sample.reshape(-1, 3), axis=0))
+                                    if unique_colors < 800:
+                                        REJECT_CACHE[url] = {"time": time.time()}
+                                        self.safe_send_bytes(415, b"Rejected illustration", extra_headers={"Cache-Control": "no-store"})
                                         return
                         except Exception:
                             pass
