@@ -1971,7 +1971,7 @@ def render_html():
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{
-  display: block;
+  display: none;
   position: fixed;
   bottom: 12px;
   left: 50%;
@@ -2617,3 +2617,4 @@ if __name__ == "__main__":
     seed_thread = threading.Thread(target=_fast_startup_seed, daemon=True)
     seed_thread.start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+
