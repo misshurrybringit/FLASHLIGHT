@@ -2233,7 +2233,7 @@ function prepareAndDraw(img, src) {{
   const usableEstimate = Math.max(0, slides.length - badSrcs.size);
   const el = document.getElementById("debug-url");
   el.textContent = rawUrl + "  [recent " + recentlyShown.length + " / usable ~" + usableEstimate + " / bad " + badSrcs.size + "]";
-  el.title = "Click to copy image URL"; el.dataset.url = rawUrl;
+  el.title = ""; el.dataset.url = "";
 }}
 function loadRandomSlide(attempts=0) {{
   if (isLoadingSlide) return;
@@ -2309,7 +2309,7 @@ let _rafPending = false;
 function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; if (!_rafPending) {{ _rafPending = true; requestAnimationFrame(() => {{ _rafPending = false; drawFlashlight(); }}); }} }}
 canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
 const debugUrlEl = document.getElementById("debug-url");
-debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
+// click-to-copy removed
 window.addEventListener("resize", () => {{ resizeCanvas(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
 
 startSlideshow();
