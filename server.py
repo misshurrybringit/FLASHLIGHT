@@ -2214,7 +2214,7 @@ function drawFlashlight() {{
   if (!currentPrepared) {{ drawFallbackMessage(); return; }}
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const minDim = Math.min(canvas.width, canvas.height);
-  const radius = minDim * (isTouchDevice ? 0.22 : 0.16);
+  const radius = minDim * (isTouchDevice ? 0.22 : 0.20);
   ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
   cutout.addColorStop(0.00,"rgba(255,248,190,1.00)"); cutout.addColorStop(0.20,"rgba(255,238,150,0.84)"); cutout.addColorStop(0.50,"rgba(255,220,95,0.46)"); cutout.addColorStop(0.82,"rgba(255,200,55,0.18)"); cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
@@ -2502,6 +2502,7 @@ class Handler(BaseHTTPRequestHandler):
                     is_guardian = "guim.co.uk" in url or "theguardian.com" in url
                     is_bbc = "bbci.co.uk" in url or "bbc.co.uk" in url
                     is_scmp = "i-scmp" in url.lower()
+                    is_f24 = "france24" in url.lower()
                     if not is_guardian and not is_bbc and url not in APPROVED_VERTICAL_URLS:
                         try:
                             arr = np.frombuffer(data, np.uint8)
@@ -2514,6 +2515,13 @@ class Handler(BaseHTTPRequestHandler):
                                         self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
                                         return
                                     APPROVED_VERTICAL_URLS.add(url)
+                                # France 24: run graphic and divider checks on approved images too
+                                # since some pass pre-vet but still have overlays.
+                                if is_f24:
+                                    if image_is_probably_full_graphic_page(data) or image_has_center_divider(data):
+                                        REJECT_CACHE[url] = {"time": time.time()}
+                                        self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
+                                        return
                                 # For SCMP, also run graphic, sharpness, and illustration checks
                                 if is_scmp:
                                     if image_is_probably_full_graphic_page(data) or image_has_center_divider(data):
