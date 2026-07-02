@@ -2226,7 +2226,7 @@ function drawFlashlight() {{
   ctx.fillStyle=warm; ctx.fillRect(0,0,canvas.width,canvas.height);
 }}
 function prepareAndDraw(img, src) {{
-  currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
+  currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight(); startAutoPan();
   recentlyShown.push(src); if (recentlyShown.length > RECENT_LIMIT) recentlyShown.shift();
   _shownThisCycle.add(src);
   const rawUrl = src.startsWith('/proxy?url=') ? decodeURIComponent(src.replace("/proxy?url=", "")) : src;
@@ -2306,8 +2306,37 @@ function loadRandomSlide(attempts=0) {{
   loader.src = src;
 }}
 let _rafPending = false;
+let _userTouching = false;
+let _autoPanStart = null;
+let _autoPanRAF = null;
+
+function startAutoPan() {{
+  if (!isVerticalPhone()) return;
+  if (_autoPanRAF) cancelAnimationFrame(_autoPanRAF);
+  _autoPanStart = performance.now();
+  function pan(ts) {{
+    if (_userTouching) return;
+    const t = (ts - _autoPanStart) / 1000;
+    const w = canvas.width, h = canvas.height;
+    // Gentle figure-8 drift covering most of the image
+    // X: slow side-to-side, Y: faster up-down to reveal subjects at different heights
+    mouseX = w * (0.5 + 0.30 * Math.sin(t * 0.4));
+    mouseY = h * (0.45 + 0.30 * Math.sin(t * 0.7));
+    drawFlashlight();
+    _autoPanRAF = requestAnimationFrame(pan);
+  }}
+  _autoPanRAF = requestAnimationFrame(pan);
+}}
+
+function stopAutoPan() {{
+  if (_autoPanRAF) {{ cancelAnimationFrame(_autoPanRAF); _autoPanRAF = null; }}
+}}
+
 function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; if (!_rafPending) {{ _rafPending = true; requestAnimationFrame(() => {{ _rafPending = false; drawFlashlight(); }}); }} }}
 canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
+canvas.addEventListener("pointerdown", (e) => {{ _userTouching = true; stopAutoPan(); updateFlashlightPositionFromPointer(e); }});
+canvas.addEventListener("pointerup", () => {{ _userTouching = false; startAutoPan(); }});
+canvas.addEventListener("pointercancel", () => {{ _userTouching = false; startAutoPan(); }});
 const debugUrlEl = document.getElementById("debug-url");
 // click-to-copy removed
 window.addEventListener("resize", () => {{ resizeCanvas(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
