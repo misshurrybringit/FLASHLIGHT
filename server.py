@@ -2182,7 +2182,10 @@ function preloadNext() {{
   }}
 }}
 function makeImage(sourceImage) {{
-  const off = document.createElement("canvas"); off.width = canvas.width; off.height = canvas.height;
+  const off = document.createElement("canvas");
+  // Render at source image resolution so panning has full detail
+  off.width = sourceImage.naturalWidth || sourceImage.width;
+  off.height = sourceImage.naturalHeight || sourceImage.height;
   const offCtx = off.getContext("2d", {{ willReadFrequently: true }}); syncContextQuality(offCtx);
   offCtx.fillStyle = "#000"; offCtx.fillRect(0,0,off.width,off.height);
   const fit = fitCover(sourceImage.width, sourceImage.height, off.width, off.height);
@@ -2215,18 +2218,34 @@ function drawFlashlight() {{
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const minDim = Math.min(canvas.width, canvas.height);
   const radius = minDim * (isTouchDevice ? 0.25 : 0.20);
-  ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
-  const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
+  const w = canvas.width, h = canvas.height;
+
+  // Pan the image under the flashlight: the flashlight stays near center,
+  // but the image shifts so moving the light reveals different parts.
+  // Image is rendered at 1.6x screen size to give room to pan.
+  const scale = 1.6;
+  const imgW = w * scale, imgH = h * scale;
+  // Map flashlight position (0..w, 0..h) to image offset
+  const panX = (mouseX / w - 0.5) * (imgW - w);
+  const panY = (mouseY / h - 0.5) * (imgH - h);
+  const imgX = (w - imgW) / 2 - panX;
+  const imgY = (h - imgH) / 2 - panY;
+
+  // Flashlight stays near center of screen
+  const cx = w / 2, cy = h / 2;
+
+  ctx.clearRect(0,0,w,h); ctx.fillStyle="#000"; ctx.fillRect(0,0,w,h);
+  const cutout = ctx.createRadialGradient(cx,cy,0,cx,cy,radius);
   cutout.addColorStop(0.00,"rgba(255,248,190,1.00)"); cutout.addColorStop(0.20,"rgba(255,238,150,0.84)"); cutout.addColorStop(0.50,"rgba(255,220,95,0.46)"); cutout.addColorStop(0.82,"rgba(255,200,55,0.18)"); cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
-  ctx.globalCompositeOperation="destination-out"; ctx.fillStyle=cutout; ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.globalCompositeOperation="destination-over"; ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
+  ctx.globalCompositeOperation="destination-out"; ctx.fillStyle=cutout; ctx.fillRect(0,0,w,h);
+  ctx.globalCompositeOperation="destination-over"; ctx.drawImage(currentPrepared,imgX,imgY,imgW,imgH);
   ctx.globalCompositeOperation="source-over";
-  const warm = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius*1.12);
+  const warm = ctx.createRadialGradient(cx,cy,0,cx,cy,radius*1.12);
   warm.addColorStop(0.00,"rgba(255,222,95,0.36)"); warm.addColorStop(0.45,"rgba(255,205,60,0.20)"); warm.addColorStop(0.85,"rgba(255,185,35,0.075)"); warm.addColorStop(1.00,"rgba(255,170,20,0.00)");
-  ctx.fillStyle=warm; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle=warm; ctx.fillRect(0,0,w,h);
 }}
 function prepareAndDraw(img, src) {{
-  currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight(); startAutoPan();
+  currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
   recentlyShown.push(src); if (recentlyShown.length > RECENT_LIMIT) recentlyShown.shift();
   _shownThisCycle.add(src);
   const rawUrl = src.startsWith('/proxy?url=') ? decodeURIComponent(src.replace("/proxy?url=", "")) : src;
@@ -2306,37 +2325,9 @@ function loadRandomSlide(attempts=0) {{
   loader.src = src;
 }}
 let _rafPending = false;
-let _userTouching = false;
-let _autoPanStart = null;
-let _autoPanRAF = null;
-
-function startAutoPan() {{
-  if (!isVerticalPhone()) return;
-  if (_autoPanRAF) cancelAnimationFrame(_autoPanRAF);
-  _autoPanStart = performance.now();
-  function pan(ts) {{
-    if (_userTouching) return;
-    const t = (ts - _autoPanStart) / 1000;
-    const w = canvas.width, h = canvas.height;
-    // Gentle figure-8 drift covering most of the image
-    // X: slow side-to-side, Y: faster up-down to reveal subjects at different heights
-    mouseX = w * (0.5 + 0.30 * Math.sin(t * 0.4));
-    mouseY = h * (0.45 + 0.30 * Math.sin(t * 0.7));
-    drawFlashlight();
-    _autoPanRAF = requestAnimationFrame(pan);
-  }}
-  _autoPanRAF = requestAnimationFrame(pan);
-}}
-
-function stopAutoPan() {{
-  if (_autoPanRAF) {{ cancelAnimationFrame(_autoPanRAF); _autoPanRAF = null; }}
-}}
 
 function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; if (!_rafPending) {{ _rafPending = true; requestAnimationFrame(() => {{ _rafPending = false; drawFlashlight(); }}); }} }}
 canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
-canvas.addEventListener("pointerdown", (e) => {{ _userTouching = true; stopAutoPan(); updateFlashlightPositionFromPointer(e); }});
-canvas.addEventListener("pointerup", () => {{ _userTouching = false; startAutoPan(); }});
-canvas.addEventListener("pointercancel", () => {{ _userTouching = false; startAutoPan(); }});
 const debugUrlEl = document.getElementById("debug-url");
 // click-to-copy removed
 window.addEventListener("resize", () => {{ resizeCanvas(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
