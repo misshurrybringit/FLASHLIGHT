@@ -2182,10 +2182,7 @@ function preloadNext() {{
   }}
 }}
 function makeImage(sourceImage) {{
-  const off = document.createElement("canvas");
-  // Render at source image resolution so panning has full detail
-  off.width = sourceImage.naturalWidth || sourceImage.width;
-  off.height = sourceImage.naturalHeight || sourceImage.height;
+  const off = document.createElement("canvas"); off.width = canvas.width; off.height = canvas.height;
   const offCtx = off.getContext("2d", {{ willReadFrequently: true }}); syncContextQuality(offCtx);
   offCtx.fillStyle = "#000"; offCtx.fillRect(0,0,off.width,off.height);
   const fit = fitCover(sourceImage.width, sourceImage.height, off.width, off.height);
@@ -2218,31 +2215,15 @@ function drawFlashlight() {{
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const minDim = Math.min(canvas.width, canvas.height);
   const radius = minDim * (isTouchDevice ? 0.25 : 0.20);
-  const w = canvas.width, h = canvas.height;
-
-  // Pan the image under the flashlight: the flashlight stays near center,
-  // but the image shifts so moving the light reveals different parts.
-  // Image is rendered at 1.6x screen size to give room to pan.
-  const scale = 1.6;
-  const imgW = w * scale, imgH = h * scale;
-  // Map flashlight position (0..w, 0..h) to image offset
-  const panX = (mouseX / w - 0.5) * (imgW - w);
-  const panY = (mouseY / h - 0.5) * (imgH - h);
-  const imgX = (w - imgW) / 2 - panX;
-  const imgY = (h - imgH) / 2 - panY;
-
-  // Flashlight stays near center of screen
-  const cx = w / 2, cy = h / 2;
-
-  ctx.clearRect(0,0,w,h); ctx.fillStyle="#000"; ctx.fillRect(0,0,w,h);
-  const cutout = ctx.createRadialGradient(cx,cy,0,cx,cy,radius);
+  ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
   cutout.addColorStop(0.00,"rgba(255,248,190,1.00)"); cutout.addColorStop(0.20,"rgba(255,238,150,0.84)"); cutout.addColorStop(0.50,"rgba(255,220,95,0.46)"); cutout.addColorStop(0.82,"rgba(255,200,55,0.18)"); cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
-  ctx.globalCompositeOperation="destination-out"; ctx.fillStyle=cutout; ctx.fillRect(0,0,w,h);
-  ctx.globalCompositeOperation="destination-over"; ctx.drawImage(currentPrepared,imgX,imgY,imgW,imgH);
+  ctx.globalCompositeOperation="destination-out"; ctx.fillStyle=cutout; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.globalCompositeOperation="destination-over"; ctx.drawImage(currentPrepared,0,0,canvas.width,canvas.height);
   ctx.globalCompositeOperation="source-over";
-  const warm = ctx.createRadialGradient(cx,cy,0,cx,cy,radius*1.12);
+  const warm = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius*1.12);
   warm.addColorStop(0.00,"rgba(255,222,95,0.36)"); warm.addColorStop(0.45,"rgba(255,205,60,0.20)"); warm.addColorStop(0.85,"rgba(255,185,35,0.075)"); warm.addColorStop(1.00,"rgba(255,170,20,0.00)");
-  ctx.fillStyle=warm; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle=warm; ctx.fillRect(0,0,canvas.width,canvas.height);
 }}
 function prepareAndDraw(img, src) {{
   currentImage = img; currentSrc = src; currentPrepared = makeImage(img); drawFlashlight();
