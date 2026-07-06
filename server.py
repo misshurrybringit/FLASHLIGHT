@@ -335,6 +335,10 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "image-1778852411",
     "image-1782674411",
     "4640960b-7b2c-4f60-addc-0718a06a0548",
+    "f35a66c0-7879-11f1-9510-1546718f668b",
+    "d5fba34000f1938b434ca92fb39c16149e786788",
+    "4ed911a0-4e59-4835-a882-2561b95e121b",
+    "3525a160-7888-11f1-a627-714adb4eed6e",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -458,7 +462,7 @@ def clean_extracted_image_url(url):
     # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, FR-2.jpg etc)
     if "france24.com" in lower and re.search(r'/[a-z]{2,4}-\d+(-\d+)?\.jpg$', lower):
         return None
-    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "-fmm-", "fmm-en", "fmm-fr", "fmm-ar", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "thumbnail", "news_en", "news_fr", "news_ar"]):
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "-fmm-", "fmm-en", "fmm-fr", "fmm-ar", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "thumbnail", "montage-", "news_en", "news_fr", "news_ar"]):
         return None
     # Also catch filenames ending in -EN.jpg, -FR.jpg, -AR.jpg (broadcast language tags)
     if "france24.com" in lower and re.search(r'-(en|fr|ar)\.jpg$', lower):
@@ -2214,7 +2218,7 @@ function drawFlashlight() {{
   if (!currentPrepared) {{ drawFallbackMessage(); return; }}
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const minDim = Math.min(canvas.width, canvas.height);
-  const radius = minDim * (isTouchDevice ? 0.25 : 0.20);
+  const radius = minDim * (isTouchDevice ? 0.24 : 0.18);
   ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
   cutout.addColorStop(0.00,"rgba(255,248,190,1.00)"); cutout.addColorStop(0.20,"rgba(255,238,150,0.84)"); cutout.addColorStop(0.50,"rgba(255,220,95,0.46)"); cutout.addColorStop(0.82,"rgba(255,200,55,0.18)"); cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
@@ -2306,9 +2310,18 @@ function loadRandomSlide(attempts=0) {{
   loader.src = src;
 }}
 let _rafPending = false;
+let _canvasRect = null;
+window.addEventListener("resize", () => {{ _canvasRect = null; }});
 
-function updateFlashlightPositionFromPointer(e) {{ const rect=canvas.getBoundingClientRect(); const isTouchDevice=window.matchMedia("(pointer: coarse)").matches; const offsetY=isTouchDevice ? window.innerHeight*0.12 : 0; mouseX=(e.clientX-rect.left)*DPR; mouseY=((e.clientY-rect.top)-offsetY)*DPR; if (!_rafPending) {{ _rafPending = true; requestAnimationFrame(() => {{ _rafPending = false; drawFlashlight(); }}); }} }}
-canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer);
+function updateFlashlightPositionFromPointer(e) {{
+  if (!_canvasRect) _canvasRect = canvas.getBoundingClientRect();
+  const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+  const offsetY = isTouchDevice ? window.innerHeight * 0.12 : 0;
+  mouseX = (e.clientX - _canvasRect.left) * DPR;
+  mouseY = ((e.clientY - _canvasRect.top) - offsetY) * DPR;
+  if (!_rafPending) {{ _rafPending = true; requestAnimationFrame(() => {{ _rafPending = false; drawFlashlight(); }}); }}
+}}
+canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer, {{ passive: true }});
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
 window.addEventListener("resize", () => {{ resizeCanvas(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
@@ -2540,7 +2553,7 @@ class Handler(BaseHTTPRequestHandler):
                                     # drawings/cartoons use a limited palette.
                                     sample = cv2.resize(img_check, (200, 112), interpolation=cv2.INTER_AREA)
                                     unique_colors = len(np.unique(sample.reshape(-1, 3), axis=0))
-                                    if unique_colors < 800:
+                                    if unique_colors < 1200:
                                         REJECT_CACHE[url] = {"time": time.time()}
                                         self.safe_send_bytes(415, b"Rejected illustration", extra_headers={"Cache-Control": "no-store"})
                                         return
