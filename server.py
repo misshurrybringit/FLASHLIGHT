@@ -339,6 +339,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "d5fba34000f1938b434ca92fb39c16149e786788",
     "4ed911a0-4e59-4835-a882-2561b95e121b",
     "3525a160-7888-11f1-a627-714adb4eed6e",
+    "6a465240-76f3-11f1-b976-0b9c15b0ccfc",
+    "011d81c0-7933-11f1-a627-714adb4eed6e",
+    "ed0503f9-796e-4422-9d64-7457b94fc27e",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1601,6 +1604,12 @@ def image_is_probably_full_graphic_page(data, strict=False):
             return True
         if gray_std < 28 and edge_density > 0.09:
             return True
+        # BBC branded graphics use a distinctive red/crimson color — detect it.
+        # BBC red is approximately H:0-10, S>150, V>100 in HSV.
+        red_mask = ((hsv[:, :, 0] < 10) | (hsv[:, :, 0] > 170)) & (hsv[:, :, 1] > 150) & (hsv[:, :, 2] > 100)
+        red_frac = float(np.mean(red_mask))
+        if red_frac > 0.04 and white_frac > 0.05:
+            return True
     else:
         if blue_frac > 0.22 and white_frac > 0.025:
             return True
@@ -2529,10 +2538,9 @@ class Handler(BaseHTTPRequestHandler):
                                         self.safe_send_bytes(415, b"Rejected portrait", extra_headers={"Cache-Control": "no-store"})
                                         return
                                     APPROVED_VERTICAL_URLS.add(url)
-                                # France 24: run graphic and divider checks on approved images too
-                                # since some pass pre-vet but still have overlays.
-                                if is_f24:
-                                    if image_is_probably_full_graphic_page(data) or image_has_center_divider(data):
+                                # France 24 and BBC: run graphic and divider checks on approved images too
+                                if is_f24 or is_bbc:
+                                    if image_is_probably_full_graphic_page(data, strict=is_bbc) or image_has_center_divider(data):
                                         REJECT_CACHE[url] = {"time": time.time()}
                                         self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                                         return
@@ -2583,13 +2591,14 @@ class Handler(BaseHTTPRequestHandler):
                                 return
                             APPROVED_VERTICAL_URLS.add(url)
                         # Run graphic-page detection for sources whose pre-vet fetch
-                        # may have failed (Al Jazeera, SCMP, France24 CDN blocks).
+                        # may have failed (Al Jazeera, SCMP, France24, BBC CDN blocks).
                         _is_aj = "aljazeera" in url.lower()
                         _is_scmp = "i-scmp" in url.lower()
                         _is_f24 = "france24" in url.lower()
                         _is_cbc = "i.cbc.ca" in url.lower()
-                        if _is_aj or _is_scmp or _is_f24 or _is_cbc:
-                            if image_is_probably_full_graphic_page(data) or image_has_center_divider(data):
+                        _is_bbc_unvet = "bbci.co.uk" in url.lower()
+                        if _is_aj or _is_scmp or _is_f24 or _is_cbc or _is_bbc_unvet:
+                            if image_is_probably_full_graphic_page(data, strict=_is_bbc_unvet) or image_has_center_divider(data):
                                 REJECT_CACHE[url] = {"time": time.time()}
                                 self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                                 return
