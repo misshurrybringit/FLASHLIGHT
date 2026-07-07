@@ -1984,7 +1984,7 @@ def render_html():
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
 #debug-url {{
-  display: block;
+  display: none;
   position: fixed;
   bottom: 12px;
   left: 50%;
@@ -2227,7 +2227,7 @@ function drawFlashlight() {{
   if (!currentPrepared) {{ drawFallbackMessage(); return; }}
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const minDim = Math.min(canvas.width, canvas.height);
-  const radius = minDim * (isTouchDevice ? 0.24 : 0.18);
+  const radius = minDim * (isTouchDevice ? 0.25 : 0.20);
   ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
   cutout.addColorStop(0.00,"rgba(255,248,190,1.00)"); cutout.addColorStop(0.20,"rgba(255,238,150,0.84)"); cutout.addColorStop(0.50,"rgba(255,220,95,0.46)"); cutout.addColorStop(0.82,"rgba(255,200,55,0.18)"); cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
