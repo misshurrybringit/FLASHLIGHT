@@ -344,6 +344,9 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "ed0503f9-796e-4422-9d64-7457b94fc27e",
     "0db1fcfc-7ef8-11f1-8634-005056bfb2b6",
     "579c3eb6-a0d6-4aa6-93ec-f55f14946c1f",
+    "d30c9ff7-bb62-4d22-9c7e-4d2d90122951",
+    "efd03ebe-d60d-44d8-99fe-cea1ad8f8f09",
+    "b63d1ee0-8413-11f1-bee8-53ce494e1abc",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1985,24 +1988,7 @@ def render_html():
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
-#debug-url {{
-  display: block;
-  position: fixed;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: rgba(255,255,255,0.55);
-  font: 11px/1.4 monospace;
-  text-align: center;
-  max-width: 90vw;
-  word-break: break-all;
-  cursor: pointer;
-  z-index: 9999;
-  padding: 4px 8px;
-  background: rgba(0,0,0,0.35);
-  border-radius: 4px;
-}}
-#debug-url:hover {{ color: rgba(255,255,255,0.9); }}
+#debug-url {{ display: none; }}
 </style>
 </head>
 <body>
@@ -2161,11 +2147,10 @@ function refillPool() {{
     fresh = candidates;
   }}
 
-  // Also filter out very recently shown images (last 30) to avoid
-  // seeing the same image twice in quick succession after a refill.
-  const recentSet = new Set(recentlyShown.slice(-30));
+  // Exclude very recently shown images to prevent close repeats.
+  const recentSet = new Set(recentlyShown.slice(-100));
   let notRecent = fresh.filter(src => !recentSet.has(src));
-  if (notRecent.length < 5) notRecent = fresh; // fallback if pool too small
+  if (notRecent.length < 10) notRecent = fresh; // fallback if pool too small
 
   shuffledPool = shuffleArray(notRecent);
   poolIndex = 0;
@@ -2566,7 +2551,7 @@ class Handler(BaseHTTPRequestHandler):
                                     # drawings/cartoons use a limited palette.
                                     sample = cv2.resize(img_check, (200, 112), interpolation=cv2.INTER_AREA)
                                     unique_colors = len(np.unique(sample.reshape(-1, 3), axis=0))
-                                    if unique_colors < 1200:
+                                    if unique_colors < 1500:
                                         REJECT_CACHE[url] = {"time": time.time()}
                                         self.safe_send_bytes(415, b"Rejected illustration", extra_headers={"Cache-Control": "no-store"})
                                         return
