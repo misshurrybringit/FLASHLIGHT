@@ -1983,25 +1983,7 @@ def render_html():
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
-#debug-url {{
-  display: none;
-  position: fixed;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: rgba(255,255,255,0.55);
-  font: 11px/1.4 monospace;
-  text-align: center;
-  max-width: 90vw;
-  word-break: break-all;
-  cursor: pointer;
-  z-index: 9999;
-  padding: 4px 8px;
-  background: rgba(0,0,0,0.35);
-  border-radius: 4px;
-  transition: color 0.2s;
-}}
-#debug-url:hover {{ color: rgba(255,255,255,0.9); }}
+#debug-url {{ display: none; }}
 </style>
 </head>
 <body>
@@ -2227,7 +2209,7 @@ function drawFlashlight() {{
   if (!currentPrepared) {{ drawFallbackMessage(); return; }}
   const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
   const minDim = Math.min(canvas.width, canvas.height);
-  const radius = minDim * (isTouchDevice ? 0.25 : 0.20);
+  const radius = minDim * (isTouchDevice ? 0.28 : 0.22);
   ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
   const cutout = ctx.createRadialGradient(mouseX,mouseY,0,mouseX,mouseY,radius);
   cutout.addColorStop(0.00,"rgba(255,248,190,1.00)"); cutout.addColorStop(0.20,"rgba(255,238,150,0.84)"); cutout.addColorStop(0.50,"rgba(255,220,95,0.46)"); cutout.addColorStop(0.82,"rgba(255,200,55,0.18)"); cutout.addColorStop(1.00,"rgba(255,185,35,0.00)");
