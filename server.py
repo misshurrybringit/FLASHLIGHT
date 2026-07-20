@@ -342,6 +342,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "6a465240-76f3-11f1-b976-0b9c15b0ccfc",
     "011d81c0-7933-11f1-a627-714adb4eed6e",
     "ed0503f9-796e-4422-9d64-7457b94fc27e",
+    "0db1fcfc-7ef8-11f1-8634-005056bfb2b6",
+    "579c3eb6-a0d6-4aa6-93ec-f55f14946c1f",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -2153,15 +2155,19 @@ function refillPool() {{
   candidates = [...new Set(candidates)];
 
   let fresh = candidates.filter(src => !_shownThisCycle.has(src));
-  // Only reset when genuinely exhausted — don't reset early or images repeat.
+  // Only reset when genuinely exhausted.
   if (fresh.length < 3) {{
     _shownThisCycle.clear();
     fresh = candidates;
   }}
 
-  // Server already interleaves sources and orders by relevance — just shuffle
-  // the whole fresh set rather than re-segregating by source.
-  shuffledPool = shuffleArray(fresh);
+  // Also filter out very recently shown images (last 30) to avoid
+  // seeing the same image twice in quick succession after a refill.
+  const recentSet = new Set(recentlyShown.slice(-30));
+  let notRecent = fresh.filter(src => !recentSet.has(src));
+  if (notRecent.length < 5) notRecent = fresh; // fallback if pool too small
+
+  shuffledPool = shuffleArray(notRecent);
   poolIndex = 0;
 }}
 function getNextRandomSrc() {{
