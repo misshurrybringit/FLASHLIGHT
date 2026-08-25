@@ -349,6 +349,10 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "b63d1ee0-8413-11f1-bee8-53ce494e1abc",
     "8e55f5b6-be0c-48c0-a730-cb883327350b",
     "91789942-a086-11f1-9424-005056bf30b7",
+    "87663275-0c6a-478b-a0f5-ce701fd7cce3",
+    "fc052cb1-436e-48ae-aed3-21489989cfa0",
+    "c1428a0f-bf62-47a4-b3e8-82b11b1dca2f",
+    "fffcf3c0-a088-11f1-aed2-8d6da8d75094",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -472,7 +476,7 @@ def clean_extracted_image_url(url):
     # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, ukraine-13.jpg etc)
     if "france24.com" in lower and re.search(r'/[a-z]+-\d+(-\d+)?\.jpg$', lower):
         return None
-    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "-fmm-", "fmm-en", "fmm-fr", "fmm-ar", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "mini", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "thumbnail", "montage-", "news_en", "news_fr", "news_ar"]):
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "-fmm-", "fmm-en", "fmm-fr", "fmm-ar", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "mini", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "thumbnail", "montage-", "sequence-", "still0", "news_en", "news_fr", "news_ar"]):
         return None
     # Also catch filenames ending in -EN.jpg, -FR.jpg, -AR.jpg (broadcast language tags)
     if "france24.com" in lower and re.search(r'-(en|fr|ar)\.jpg$', lower):
@@ -2647,7 +2651,7 @@ class Handler(BaseHTTPRequestHandler):
                                     # drawings/cartoons use a limited palette.
                                     sample = cv2.resize(img_check, (200, 112), interpolation=cv2.INTER_AREA)
                                     unique_colors = len(np.unique(sample.reshape(-1, 3), axis=0))
-                                    if unique_colors < 1500:
+                                    if unique_colors < 2000:
                                         REJECT_CACHE[url] = {"time": time.time()}
                                         self.safe_send_bytes(415, b"Rejected illustration", extra_headers={"Cache-Control": "no-store"})
                                         return
