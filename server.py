@@ -1988,7 +1988,24 @@ def render_html():
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
-#debug-url {{ display: none; }}
+#debug-url {{
+  display: block;
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.55);
+  font: 11px/1.4 monospace;
+  text-align: center;
+  max-width: 90vw;
+  word-break: break-all;
+  cursor: pointer;
+  z-index: 9999;
+  padding: 4px 8px;
+  background: rgba(0,0,0,0.35);
+  border-radius: 4px;
+}}
+#debug-url:hover {{ color: rgba(255,255,255,0.9); }}
 </style>
 </head>
 <body>
