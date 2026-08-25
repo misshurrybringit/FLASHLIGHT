@@ -347,6 +347,8 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "d30c9ff7-bb62-4d22-9c7e-4d2d90122951",
     "efd03ebe-d60d-44d8-99fe-cea1ad8f8f09",
     "b63d1ee0-8413-11f1-bee8-53ce494e1abc",
+    "8e55f5b6-be0c-48c0-a730-cb883327350b",
+    "91789942-a086-11f1-9424-005056bf30b7",
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -467,10 +469,10 @@ def clean_extracted_image_url(url):
     # France 24 PNG files are always graphics, not news photos.
     if "france24.com" in lower and (lower.endswith(".png") or ".png?" in lower):
         return None
-    # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, FR-2.jpg etc)
-    if "france24.com" in lower and re.search(r'/[a-z]{2,4}-\d+(-\d+)?\.jpg$', lower):
+    # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, ukraine-13.jpg etc)
+    if "france24.com" in lower and re.search(r'/[a-z]+-\d+(-\d+)?\.jpg$', lower):
         return None
-    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "-fmm-", "fmm-en", "fmm-fr", "fmm-ar", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "thumbnail", "montage-", "news_en", "news_fr", "news_ar"]):
+    if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "-fmm-", "fmm-en", "fmm-fr", "fmm-ar", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "mini", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "thumbnail", "montage-", "news_en", "news_fr", "news_ar"]):
         return None
     # Also catch filenames ending in -EN.jpg, -FR.jpg, -AR.jpg (broadcast language tags)
     if "france24.com" in lower and re.search(r'-(en|fr|ar)\.jpg$', lower):
@@ -1495,6 +1497,9 @@ def _pre_vet_one(url):
             if image_has_center_divider(data):
                 REJECT_CACHE[url] = {"time": time.time()}
                 return
+            if is_france24 and image_has_text_overlay(data):
+                REJECT_CACHE[url] = {"time": time.time()}
+                return
             APPROVED_URLS.add(url)
         except Exception:
             # Fetch failed (CDN blocking pre-vet) — don't auto-approve.
@@ -1857,6 +1862,76 @@ def image_is_portrait_or_generic_isolated_subject(data, allow_vertical=False):
             return True
 
     return False
+
+def image_has_text_overlay(data):
+    """Detect text overlaid on news photos — title cards, chyrons, graphic labels.
+
+    Text creates dense clusters of small, uniform-height connected components
+    in edge maps. Real photo textures (grass, fabric, crowds) have random
+    component sizes; text has very consistent small rectangular blobs in rows.
+    """
+    try:
+        arr = np.frombuffer(data, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    except Exception:
+        return False
+    if img is None or img.size == 0:
+        return False
+    h, w = img.shape[:2]
+
+    # Work at a fixed width for speed.
+    target_w = 640
+    if w > target_w:
+        scale = target_w / float(w)
+        img = cv2.resize(img, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
+    h, w = img.shape[:2]
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Look in the bottom third and top quarter where chyrons/titles appear.
+    regions = [
+        gray[:int(h * 0.28), :],        # top
+        gray[int(h * 0.65):, :],         # bottom
+    ]
+
+    for region in regions:
+        rh, rw = region.shape[:2]
+        if rh < 10:
+            continue
+
+        # Threshold to isolate bright text on dark backgrounds or dark on bright.
+        _, bright = cv2.threshold(region, 200, 255, cv2.THRESH_BINARY)
+        _, dark = cv2.threshold(region, 55, 255, cv2.THRESH_BINARY_INV)
+
+        for binary in (bright, dark):
+            # Find connected components.
+            num_labels, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+            if num_labels < 5:
+                continue
+
+            # Collect component heights and widths (skip background label 0).
+            heights = []
+            widths = []
+            for i in range(1, num_labels):
+                cw = int(stats[i, cv2.CC_STAT_WIDTH])
+                ch = int(stats[i, cv2.CC_STAT_HEIGHT])
+                area = int(stats[i, cv2.CC_STAT_AREA])
+                # Text characters are small, roughly square-ish, with decent fill.
+                if 3 <= cw <= rw * 0.15 and 4 <= ch <= rh * 0.6 and area > 6:
+                    heights.append(ch)
+                    widths.append(cw)
+
+            if len(heights) < 8:
+                continue
+
+            heights = np.array(heights)
+            # Text has very consistent character height — low coefficient of variation.
+            height_cv = float(np.std(heights) / (np.mean(heights) + 1e-6))
+            if height_cv < 0.35 and len(heights) > 12:
+                return True
+
+    return False
+
 
 def image_has_center_divider(data):
     try:
@@ -2551,6 +2626,10 @@ class Handler(BaseHTTPRequestHandler):
                                         REJECT_CACHE[url] = {"time": time.time()}
                                         self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                                         return
+                                    if is_f24 and image_has_text_overlay(data):
+                                        REJECT_CACHE[url] = {"time": time.time()}
+                                        self.safe_send_bytes(415, b"Rejected text overlay", extra_headers={"Cache-Control": "no-store"})
+                                        return
                                 # For SCMP, also run graphic, sharpness, and illustration checks
                                 if is_scmp:
                                     if image_is_probably_full_graphic_page(data) or image_has_center_divider(data):
@@ -2608,6 +2687,10 @@ class Handler(BaseHTTPRequestHandler):
                             if image_is_probably_full_graphic_page(data, strict=_is_bbc_unvet) or image_has_center_divider(data):
                                 REJECT_CACHE[url] = {"time": time.time()}
                                 self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
+                                return
+                            if _is_f24 and image_has_text_overlay(data):
+                                REJECT_CACHE[url] = {"time": time.time()}
+                                self.safe_send_bytes(415, b"Rejected text overlay", extra_headers={"Cache-Control": "no-store"})
                                 return
                             # Sharpness check for SCMP — reject genuinely blurry/grainy images
                             # (some SCMP images are low-quality wire photos upscaled to 1280x720)
