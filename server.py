@@ -2306,13 +2306,7 @@ def render_html():
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
 canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
-#debug-url {{
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
-  padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
-  font: 11px/1.3 ui-monospace, Menlo, monospace; color: rgba(255,255,255,0.75);
-  background: rgba(0,0,0,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  cursor: pointer; user-select: all; -webkit-user-select: all;
-}}
+#debug-url {{ display: none; }}
 </style>
 </head>
 <body>
