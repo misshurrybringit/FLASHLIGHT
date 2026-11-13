@@ -1526,6 +1526,7 @@ def _background_pool_refresher():
             # from a previous cycle doesn't block an image from being collected
             # this cycle (it would otherwise sit unused until the cache aged out).
             REJECT_CACHE.clear()
+            cleanup_proxy_cache()
             refresh_count += 1
             images = get_bbc_images(limit=MAX_IMAGE_POOL)
             print(f"[BG] Pool ready: {len(images)} images in {time.time()-t0:.1f}s", flush=True)
@@ -1582,6 +1583,14 @@ def _pre_cache_seed(images):
         print(f"[BG] AP pre-cached: {ap_cached}/{len(ap_seed)} succeeded.", flush=True)
 
 
+def _keep_vetted_bytes(url, data, content_type):
+    """Store an image that just passed vetting so /proxy can serve it instantly
+    (the vet already downloaded it). Bounded by PROXY_CACHE_MAX_ITEMS."""
+    if url in PROXY_CACHE or len(PROXY_CACHE) >= PROXY_CACHE_MAX_ITEMS:
+        return
+    PROXY_CACHE[url] = {"time": time.time(), "data": data, "content_type": content_type}
+
+
 def _pre_vet_one(url):
     """Fetch and check one image; add to APPROVED_URLS if it passes."""
     if url in APPROVED_URLS:
@@ -1614,6 +1623,7 @@ def _pre_vet_one(url):
                 REJECT_CACHE[url] = {"time": time.time()}
                 return
             APPROVED_URLS.add(url)
+            _keep_vetted_bytes(url, data, content_type)
         except Exception:
             # Fetch failed (CDN blocking pre-vet) — don't auto-approve.
             # Leave unapproved so the proxy-time cv2 check still runs.
@@ -1679,6 +1689,7 @@ def _pre_vet_one(url):
             print(f"[VET] rejected (vertical photo on background): {url[:90]}", flush=True)
             return
         APPROVED_URLS.add(url)
+        _keep_vetted_bytes(url, data, content_type)
         if is_bbc:
             print(f"[VET] BBC approved: {url[:90]}", flush=True)
     except Exception as e:
@@ -2283,8 +2294,17 @@ def render_html():
         return 7200
 
     # Take top candidates from the pool and sort by actual freshness
-    candidates = clean[:60]
-    seed = sorted(candidates, key=image_age_seconds)[:10]
+    # First slides: images already downloaded and vetted (instant), then
+    # approved ones, then the freshest of the rest.
+    ready = [u for u in clean if u in PROXY_CACHE and u in APPROVED_URLS]
+    approved = [u for u in clean if u in APPROVED_URLS and u not in PROXY_CACHE]
+    random.shuffle(ready)
+    seed = ready[:10]
+    if len(seed) < 10:
+        seed += sorted(approved[:60], key=image_age_seconds)[:10 - len(seed)]
+    if len(seed) < 10:
+        seen_seed = set(seed)
+        seed += sorted([u for u in clean[:60] if u not in seen_seed], key=image_age_seconds)[:10 - len(seed)]
     sequence = []
     for img in seed:
         src = "/proxy?url=" + urllib.parse.quote(img, safe="")
@@ -2305,7 +2325,7 @@ def render_html():
 <link rel="apple-touch-icon" href="/icon-192.png">
 <style>
 html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; cursor:none; }}
-canvas {{ display:block; width:100vw; height:100vh; touch-action:none; }}
+canvas {{ display:block; position:fixed; inset:0; width:100%; height:100%; touch-action:none; }}
 #debug-url {{ display: none; }}
 </style>
 </head>
@@ -2322,7 +2342,19 @@ let _slideshowReady = false;
 function startSlideshow() {{
   if (_slideshowReady) return;
   _slideshowReady = true;
-  resizeCanvas(); mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); preloadNext();
+  resizeCanvas(); _lastW = canvas.clientWidth; _lastH = canvas.clientHeight;
+  mouseX=canvas.width/2; mouseY=canvas.height/2; refillPool(); preloadNext();
+  // Load the first few candidates at once and show whichever arrives first.
+  shuffledPool.slice(0, 4).forEach(src => {{
+    const im = new Image();
+    im.onload = () => {{
+      if (currentImage) {{ preloadCache.set(src, im); return; }}
+      if (!isVerticalPhone() && im.naturalHeight > im.naturalWidth * 1.08) return;
+      prepareAndDraw(im, src);
+    }};
+    im.onerror = () => badSrcs.add(src);
+    im.src = src;
+  }});
 
   (function tryLoad() {{
     if (!currentImage) {{ loadRandomSlide(); setTimeout(tryLoad, currentImage ? 1000 : 300); }}
@@ -2419,9 +2451,10 @@ const RECENT_LIMIT = 1200;
 function syncContextQuality(targetCtx) {{ targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = "high"; }}
 function resizeCanvas() {{
   DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
-  VIEW_W = window.innerWidth; VIEW_H = window.innerHeight;
+  // Measure the canvas as laid out (CSS makes it fill the screen) — iOS
+  // reports stale innerWidth/innerHeight right after rotating.
+  VIEW_W = canvas.clientWidth || window.innerWidth; VIEW_H = canvas.clientHeight || window.innerHeight;
   canvas.width = Math.round(VIEW_W * DPR); canvas.height = Math.round(VIEW_H * DPR);
-  canvas.style.width = VIEW_W + "px"; canvas.style.height = VIEW_H + "px";
   syncContextQuality(ctx);
   if (!mouseX && !mouseY) {{ mouseX = canvas.width / 2; mouseY = canvas.height / 2; }}
 }}
@@ -2682,7 +2715,26 @@ function updateFlashlightPositionFromPointer(e) {{
 canvas.addEventListener("pointermove", updateFlashlightPositionFromPointer, {{ passive: true }});
 const debugUrlEl = document.getElementById("debug-url");
 debugUrlEl.addEventListener("click", async (e) => {{ e.stopPropagation(); const url=debugUrlEl.dataset.url || debugUrlEl.textContent; if(!url) return; try {{ await navigator.clipboard.writeText(url); const oldText=debugUrlEl.textContent; debugUrlEl.textContent="copied"; setTimeout(() => {{ debugUrlEl.textContent=oldText; }}, 650); }} catch(err) {{ window.prompt("Copy image URL:", url); }} }});
-window.addEventListener("resize", () => {{ resizeCanvas(); if(currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }} }});
+let _lastW = 0, _lastH = 0;
+function handleViewportChange() {{
+  _canvasRect = null;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (w === _lastW && h === _lastH) return;
+  const fx = canvas.width ? mouseX / canvas.width : 0.5, fy = canvas.height ? mouseY / canvas.height : 0.5;
+  _lastW = w; _lastH = h;
+  resizeCanvas();
+  mouseX = fx * canvas.width; mouseY = fy * canvas.height;
+  if (currentImage) {{ currentPrepared = makeImage(currentImage); drawFlashlight(); }} else {{ loadRandomSlide(); }}
+}}
+function scheduleViewportChecks() {{
+  // Rotation settles over a few hundred ms on phones — re-measure a few times.
+  handleViewportChange();
+  [100, 300, 600, 1000].forEach(t => setTimeout(handleViewportChange, t));
+}}
+window.addEventListener("resize", scheduleViewportChecks);
+window.addEventListener("orientationchange", scheduleViewportChecks);
+if (window.visualViewport) window.visualViewport.addEventListener("resize", scheduleViewportChecks);
+if (screen.orientation) screen.orientation.addEventListener("change", scheduleViewportChecks);
 
 startSlideshow();
 </script>
