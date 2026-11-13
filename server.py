@@ -45,7 +45,7 @@ RSS_FEEDS = [
 ]
 
 SOURCE_PAGES = [
-    "https://www.theguardian.com/",
+    # Guardian homepage removed — it is full of lifestyle/culture promos.
     "https://www.theguardian.com/world",
     "https://www.theguardian.com/us-news",
     "https://www.theguardian.com/politics",
@@ -91,10 +91,11 @@ APPROVED_VERTICAL_URLS = set()  # subset of APPROVED_URLS that are vertical-frie
 
 GUARDIAN_API_ENABLED = True
 GUARDIAN_API_KEY = "92e99e1d-f706-45be-b06a-35af28e94141"
+# Hard-news sections only — society/business/cities leaned toward
+# lifestyle and stock-style photos.
 GUARDIAN_API_SECTIONS = [
     "world", "us-news", "politics",
-    "global-development", "society",
-    "business", "law", "cities",
+    "global-development", "law",
 ]
 # Sections that trend toward archival/stock imagery — fetch fewer pages from these.
 GUARDIAN_API_SLOW_SECTIONS = {"society", "business", "cities"}
@@ -354,6 +355,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "c1428a0f-bf62-47a4-b3e8-82b11b1dca2f",
     "fffcf3c0-a088-11f1-aed2-8d6da8d75094",
     "84498144-dea4-11f1-ad4b-3f371022a770",  # France 24, thin white divider
+    "f4a303f6-deaf-11f1-971a-29048b396e03",  # France 24, text title card
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -469,19 +471,25 @@ def clean_extracted_image_url(url):
             return None
     # France 24 filenames ending in -CS.jpg are broadcast graphics/composite
     # images with text/graphics overlaid — not clean news photos.
-    if "france24.com" in lower and (re.search(r'-cs\d*\.jpg$', lower) or lower.endswith("-cs.jpg")):
+    if "france24.com" in lower and re.search(r'-cs\d*\.jpe?g$', lower):
         return None
     # France 24 PNG files are always graphics, not news photos.
     if "france24.com" in lower and (lower.endswith(".png") or ".png?" in lower):
         return None
     # Short broadcast-style filenames (EN-1.jpg, EN-1-1.jpg, ukraine-13.jpg etc)
-    if "france24.com" in lower and re.search(r'/[a-z]+-\d+(-\d+)?\.jpg$', lower):
+    if "france24.com" in lower and re.search(r'/[a-z]+-\d+(-\d+)?\.jpe?g$', lower):
         return None
     if "france24.com" in lower and any(t in lower for t in ["img-default", "default-f24", "logo-f24", "placeholder", "reporters-", "/reporters/", "fr-en.jpg", "-fr-en-", "capture-", "anglais-", "/angl", "france-m%c3%a9dias", "france-medias", "-fmm-", "fmm-en", "fmm-fr", "fmm-ar", "1280x720px", "1280x720-", "1280x720_", "1920x1080px", "1920x1080-", "1920x1080_", "france24-", "minien-", "minifr-", "miniar-", "mini", "images-tiktok", "images-twitter", "images-facebook", "images-social", "vignette", "thumbnail", "montage-", "sequence-", "still0", "news_en", "news_fr", "news_ar"]):
         return None
     # Also catch filenames ending in -EN.jpg, -FR.jpg, -AR.jpg (broadcast language tags)
-    if "france24.com" in lower and re.search(r'-(en|fr|ar)\.jpg$', lower):
+    if "france24.com" in lower and re.search(r'-(en|fr|ar)\.jpe?g$', lower):
         return None
+    # France 24 video title cards / programme graphics, named in the filename
+    # (e.g. "Title-Hegseth-vid.jpeg").
+    if "france24.com" in lower:
+        f24_name = lower.rsplit("/", 1)[-1]
+        if re.search(r'(^|[-_])(title|titre|vid|video|videos|cover|plateau|promo|teaser|card|graphic|graphique|carte|map|infographic)([-_.]|$)', f24_name):
+            return None
     # France 24 URLs contain a /w:NNN/ width parameter — reject small sizes
     # and upgrade larger ones to 1280px for better quality.
     if "france24.com" in url:
@@ -672,6 +680,19 @@ def source_domains_match(url, base_url):
         return False
 
 
+GUARDIAN_NON_NEWS_SECTIONS = [
+    "/lifeandstyle", "/food", "/fashion", "/travel", "/culture", "/film",
+    "/music", "/books", "/tv-and-radio", "/stage", "/artanddesign", "/games",
+    "/money", "/wellness", "/well-actually", "/technology", "/sport",
+    "/football", "/commentisfree", "/crosswords", "/media", "/science",
+    "/the-filter", "/thefilter", "/recipes", "/inequality", "/careers",
+    "/membership", "/info", "/help", "/guardian-masterclasses", "/observer-food",
+    "/theobserver/magazine", "/weekend", "/the-guide", "/obituaries", "/business/",
+    "/global/", "/society/", "/cities/", "/healthcare-network", "/teacher-network",
+    "/gnm-press-office", "/series/", "/profile/", "/tone/", "/newsletters",
+]
+
+
 def extract_article_links_from_html(html, base_url, max_links=40):
     links = []
     seen = set()
@@ -683,6 +704,9 @@ def extract_article_links_from_html(html, base_url, max_links=40):
             continue
         lower = link.lower()
         if any(skip in lower for skip in ["/video/", "/podcast", "/live", "signin", "subscribe", "login"]):
+            continue
+        # Guardian: only follow hard-news article links.
+        if "theguardian.com" in lower and any(s in lower for s in GUARDIAN_NON_NEWS_SECTIONS):
             continue
         # Skip France 24 French national news section
         if "france24.com" in lower and "/en/france/" in lower:
@@ -1379,8 +1403,12 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
         found_links = []
         try:
             html = fetch_text(page_url, timeout=3.0)
-            found_imgs = extract_inline_images_from_html(html, page_url, max_images=60)
             found_links = extract_article_links_from_html(html, page_url, max_links=60)
+            # Guardian section pages carry promo images from every section
+            # (food, fashion, culture...). Take Guardian images only from the
+            # news articles themselves, which are filtered by section above.
+            if "theguardian.com" not in page_url:
+                found_imgs = extract_inline_images_from_html(html, page_url, max_images=60)
         except Exception:
             pass
         return found_imgs, found_links
@@ -1557,7 +1585,7 @@ def _pre_vet_one(url):
             if image_has_center_divider(data):
                 REJECT_CACHE[url] = {"time": time.time()}
                 return
-            if is_france24 and image_has_text_overlay(data):
+            if is_france24 and (image_has_text_overlay(data) or image_has_short_label(data)):
                 REJECT_CACHE[url] = {"time": time.time()}
                 return
             APPROVED_URLS.add(url)
@@ -2307,7 +2335,9 @@ function startSlideshow() {{
 let slides = {sequence_json};
 const SEQUENCE_LENGTH_JS = {SEQUENCE_LENGTH};
 const canvas = document.getElementById("view");
-const ctx = canvas.getContext("2d", {{ willReadFrequently: true }});
+// GPU-backed, low-latency canvas: the main view is only drawn to, never read
+// back, so willReadFrequently (which forces slow CPU rendering) is not used.
+const ctx = canvas.getContext("2d", {{ desynchronized: true }}) || canvas.getContext("2d");
 let currentPrepared = null, currentImage = null, currentSrc = null;
 let mouseX = 0, mouseY = 0, DPR = 1, VIEW_W = window.innerWidth, VIEW_H = window.innerHeight;
 let shuffledPool = [], poolIndex = 0, isLoadingSlide = false;
@@ -2421,7 +2451,7 @@ function preloadNext() {{
 }}
 function makeImage(sourceImage) {{
   const off = document.createElement("canvas"); off.width = canvas.width; off.height = canvas.height;
-  const offCtx = off.getContext("2d", {{ willReadFrequently: true }}); syncContextQuality(offCtx);
+  const offCtx = off.getContext("2d"); syncContextQuality(offCtx);  // GPU: copied to screen every frame
   offCtx.fillStyle = "#000"; offCtx.fillRect(0,0,off.width,off.height);
   const fit = fitCover(sourceImage.width, sourceImage.height, off.width, off.height);
 
@@ -2769,7 +2799,7 @@ class Handler(BaseHTTPRequestHandler):
                                         REJECT_CACHE[url] = {"time": time.time()}
                                         self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                                         return
-                                    if is_f24 and image_has_text_overlay(data):
+                                    if is_f24 and (image_has_text_overlay(data) or image_has_short_label(data)):
                                         REJECT_CACHE[url] = {"time": time.time()}
                                         self.safe_send_bytes(415, b"Rejected text overlay", extra_headers={"Cache-Control": "no-store"})
                                         return
@@ -2831,7 +2861,7 @@ class Handler(BaseHTTPRequestHandler):
                                 REJECT_CACHE[url] = {"time": time.time()}
                                 self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                                 return
-                            if _is_f24 and image_has_text_overlay(data):
+                            if _is_f24 and (image_has_text_overlay(data) or image_has_short_label(data)):
                                 REJECT_CACHE[url] = {"time": time.time()}
                                 self.safe_send_bytes(415, b"Rejected text overlay", extra_headers={"Cache-Control": "no-store"})
                                 return
