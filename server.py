@@ -356,6 +356,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "fffcf3c0-a088-11f1-aed2-8d6da8d75094",
     "84498144-dea4-11f1-ad4b-3f371022a770",  # France 24, thin white divider
     "f4a303f6-deaf-11f1-971a-29048b396e03",  # France 24, text title card
+    "74663f32-dea5-11f1-b60f-695cb59fade5",  # France 24, Billet retour programme card
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -489,6 +490,23 @@ def clean_extracted_image_url(url):
     if "france24.com" in lower:
         f24_name = lower.rsplit("/", 1)[-1]
         if re.search(r'(^|[-_])(title|titre|vid|video|videos|cover|plateau|promo|teaser|card|graphic|graphique|carte|map|infographic)([-_.]|$)', f24_name):
+            return None
+        # Broadcast language tag anywhere in the name (…-EN-Afghanistan.jpg)
+        # marks a programme graphic rather than a news photo.
+        if re.search(r'(^|[-_])(en|fr|ar|es)([-_.])', f24_name):
+            return None
+        # France 24 programme/show thumbnails (branded, often with titles).
+        if any(show in f24_name for show in [
+            "billet-retour", "reporters", "focus", "the-debate", "debate-",
+            "talking-europe", "eye-on-africa", "tech24", "down-to-earth",
+            "inside-the-americas", "revisited", "perspective", "the-interview",
+            "interview-", "media-watch", "business-daily", "france-in-focus",
+            "chronique", "decryptage", "observers", "les-observateurs",
+            "culture-critic", "encore", "fashion", "en-focus", "the-world-this-week",
+            "europe-now", "people-and-profit", "keep-calm", "you-are-here",
+            "on-the-ground", "the-51", "ici-l-europe", "a-l-affiche", "le-debat",
+            "journal", "bulletin", "newsroom", "headlines", "edition-",
+        ]):
             return None
     # France 24 URLs contain a /w:NNN/ width parameter — reject small sizes
     # and upgrade larger ones to 1280px for better quality.
@@ -1427,10 +1445,16 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             except Exception:
                 pass
 
+    # Guardian article links get their own budget — Guardian images now come
+    # only from news articles, so they must not be crowded out by the many
+    # Al Jazeera / France 24 links competing for the shared budget.
     random.shuffle(all_article_links)
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    guardian_links = [l for l in all_article_links if "theguardian.com" in l]
+    other_links = [l for l in all_article_links if "theguardian.com" not in l]
+    to_scrape = guardian_links[:60] + other_links[:page_article_scrape_budget]
+    with ThreadPoolExecutor(max_workers=8) as ex:
         art_futures = [ex.submit(extract_image_from_html_page, l)
-                      for l in all_article_links[:page_article_scrape_budget]]
+                      for l in to_scrape]
         for fut in as_completed(art_futures):
             try:
                 add_image(fut.result())
@@ -2399,8 +2423,30 @@ function refillPool() {{
   let notRecent = fresh.filter(src => !recentSet.has(src));
   if (notRecent.length < 10) notRecent = fresh; // fallback if pool too small
 
-  shuffledPool = shuffleArray(notRecent);
+  shuffledPool = balanceBySource(notRecent);
   poolIndex = 0;
+}}
+function slideSource(src) {{
+  const u = decodeURIComponent(src);
+  if (u.includes("guim.co.uk")) return "guardian";
+  if (u.includes("bbci.co.uk")) return "bbc";
+  if (u.includes("aljazeera")) return "aljazeera";
+  if (u.includes("france24")) return "france24";
+  if (u.includes("i-scmp") || u.includes("scmp.com")) return "scmp";
+  if (u.includes("i.cbc.ca") || u.includes("cbcrc")) return "cbc";
+  return "other";
+}}
+// Shuffle each source separately, then deal them out round-robin (sources in
+// random order each round) so every source gets an equal share of slides.
+function balanceBySource(srcs) {{
+  const groups = {{}};
+  for (const src of srcs) (groups[slideSource(src)] ||= []).push(src);
+  const lists = Object.values(groups).map(shuffleArray);
+  const out = [];
+  while (lists.some(l => l.length)) {{
+    for (const l of shuffleArray(lists)) if (l.length) out.push(l.pop());
+  }}
+  return out;
 }}
 function photoKey(urlOrSrc) {{
   let u = urlOrSrc || "";
