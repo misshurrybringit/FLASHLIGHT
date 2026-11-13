@@ -357,6 +357,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "84498144-dea4-11f1-ad4b-3f371022a770",  # France 24, thin white divider
     "f4a303f6-deaf-11f1-971a-29048b396e03",  # France 24, text title card
     "74663f32-dea5-11f1-b60f-695cb59fade5",  # France 24, Billet retour programme card
+    "26159f10-df8d-11f1-a701-fddedf244c16",  # BBC, vertical photo on background
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -1606,7 +1607,7 @@ def _pre_vet_one(url):
             if image_is_probably_full_graphic_page(data):
                 REJECT_CACHE[url] = {"time": time.time()}
                 return
-            if image_has_center_divider(data):
+            if image_has_center_divider(data) or image_is_pillarboxed(data):
                 REJECT_CACHE[url] = {"time": time.time()}
                 return
             if is_france24 and (image_has_text_overlay(data) or image_has_short_label(data)):
@@ -1672,6 +1673,10 @@ def _pre_vet_one(url):
             REJECT_CACHE[url] = {"time": time.time()}
             if is_bbc:
                 print(f"[VET] BBC rejected (center divider): {url[:90]}", flush=True)
+            return
+        if image_is_pillarboxed(data):
+            REJECT_CACHE[url] = {"time": time.time()}
+            print(f"[VET] rejected (vertical photo on background): {url[:90]}", flush=True)
             return
         APPROVED_URLS.add(url)
         if is_bbc:
@@ -2118,6 +2123,55 @@ def image_has_thin_light_line(img):
         if float(np.mean(brighter)) > 0.78:
             return True
     return False
+
+
+def image_is_pillarboxed(data):
+    """Portrait photo placed on a blurred/plain background in a wide frame:
+    a sharp central strip with low-detail bands either side, joined by two
+    vertical boundaries placed roughly symmetrically."""
+    try:
+        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    except Exception:
+        return False
+    if img is None or img.size == 0:
+        return False
+    h, w = img.shape[:2]
+    if w < h * 1.15:
+        return False
+    if w > 640:
+        img = cv2.resize(img, (640, int(h * 640 / w)), interpolation=cv2.INTER_AREA)
+        h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    detail = np.abs(cv2.Laplacian(gray, cv2.CV_32F)).mean(axis=0)
+    detail = np.convolve(detail, np.ones(9) / 9, mode="same")
+    center = float(np.median(detail[int(w * 0.42):int(w * 0.58)]))
+    if center < 3:
+        return False
+    low = detail < center * 0.35
+    # Width of the low-detail band on each side, measured from the edge.
+    def band(cols):
+        n = 0
+        for v in cols:
+            if not v:
+                break
+            n += 1
+        return n
+    left = band(low[8:]) + 8 if low[8:12].all() else 0
+    right = band(low[::-1][8:]) + 8 if low[::-1][8:12].all() else 0
+    if left < w * 0.10 or right < w * 0.10:
+        return False
+    # Picture strip should be portrait-ish and the bands roughly symmetric.
+    strip = w - left - right
+    if strip <= 0 or strip > h * 1.05:
+        return False
+    if abs(left - right) > w * 0.08:
+        return False
+    # Sharp vertical boundary at each band edge (picture edge vs background).
+    gx = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))
+    def edge_strength(x):
+        x0, x1 = max(0, x - 8), min(w, x + 9)
+        return float(np.mean(gx[:, x0:x1].max(axis=1) > 25))
+    return edge_strength(left) > 0.5 and edge_strength(w - right) > 0.5
 
 
 def image_has_center_divider(data):
@@ -2903,7 +2957,7 @@ class Handler(BaseHTTPRequestHandler):
                         _is_cbc = "i.cbc.ca" in url.lower()
                         _is_bbc_unvet = "bbci.co.uk" in url.lower()
                         if _is_aj or _is_scmp or _is_f24 or _is_cbc or _is_bbc_unvet:
-                            if image_is_probably_full_graphic_page(data, strict=_is_bbc_unvet) or image_has_center_divider(data):
+                            if image_is_probably_full_graphic_page(data, strict=_is_bbc_unvet) or image_has_center_divider(data) or image_is_pillarboxed(data):
                                 REJECT_CACHE[url] = {"time": time.time()}
                                 self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                                 return
