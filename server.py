@@ -1061,6 +1061,32 @@ def is_bbc_feed_url(url):
     return "bbci.co.uk" in url or "bbc.co.uk" in url
 
 
+# BBC sections whose RSS thumbnails are almost always branded title cards
+# ("In Depth", "Newsflash", "Newscast", "Verify", live-page banners, video
+# stills with BBC logos) rather than clean news photos.
+BBC_SKIP_LINK_SECTIONS = [
+    "/technology/", "/tech/", "/sport/", "/entertainment/",
+    "/culture/", "/travel/", "/food/", "/science/",
+    "/live/", "/av/", "/videos/", "/reel/", "/newsbeat",
+    "/sounds/", "/iplayer/", "/programmes/", "/worklife/", "/future/",
+    "/in-depth", "/indepth", "/verify", "/newscast", "/podcasts/",
+]
+
+# If the same BBC image is attached to this many different articles, it is a
+# reused branded card (In Depth / Newsflash etc.), not a story photo.
+BBC_REPEAT_IMAGE_THRESHOLD = 2
+
+
+def bbc_link_is_skipped(link_url):
+    lower = (link_url or "").lower()
+    return any(s in lower for s in BBC_SKIP_LINK_SECTIONS)
+
+
+def bbc_item_link(item):
+    link_el = item.find("link")
+    return ((link_el.text or "") if link_el is not None else "").strip()
+
+
 def source_category(url):
     lower = (url or "").lower()
     if "guim.co.uk" in lower or "theguardian" in lower:
@@ -1245,14 +1271,9 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
             is_aljazeera_feed = "aljazeera.com" in feed_url
             for item in items[:item_limit]:
                 # Skip BBC items from sections we don't want
-                if is_bbc:
-                    link_el = item.find("link")
-                    link_url = (link_el.text or "") if link_el is not None else ""
-                    if any(s in link_url for s in [
-                        "/technology/", "/tech/", "/sport/", "/entertainment/",
-                        "/culture/", "/travel/", "/food/", "/science/",
-                    ]):
-                        continue
+                item_link = bbc_item_link(item)
+                if is_bbc and bbc_link_is_skipped(item_link):
+                    continue
                 # Skip Al Jazeera tech/science/sport/culture items
                 if is_aljazeera_feed:
                     link_el = item.find("link")
@@ -1266,14 +1287,14 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                 if img:
                     cleaned = clean_extracted_image_url(img)
                     if cleaned and not url_is_known_bad(cleaned):
-                        found.append((cleaned, is_bbc))
+                        found.append((cleaned, is_bbc, item_link))
                         found_imgs += 1
                     elif is_guardian_feed and not cleaned:
                         print(f"[RSS] Guardian image rejected by clean: {img[:80]}", flush=True)
                 elif not is_bbc:
                     link = item.find("link")
                     if link is not None and link.text:
-                        found.append((link.text.strip(), "article_link"))
+                        found.append((link.text.strip(), "article_link", None))
             name = feed_url.split("/")[-2] if feed_url.endswith("rss") else feed_url.split("/")[-1]
             print(f"[RSS] {name} — {len(items)} items, {found_imgs} images", flush=True)
         except Exception as e:
@@ -1294,13 +1315,28 @@ def get_bbc_images(limit=MAX_IMAGE_POOL):
                 pass
         # Sort: non-BBC feeds first.
         results.sort(key=lambda x: 1 if is_bbc_feed_url(x[0]) else 0)
+
+        # Find BBC images reused across several different articles — those are
+        # branded title cards (In Depth, Newsflash, ...), not story photos.
+        bbc_image_links = {}
+        for _feed_url, items in results:
+            for url_or_link, kind, item_link in items:
+                if kind is True and item_link:
+                    bbc_image_links.setdefault(canonical_image_key(url_or_link), set()).add(item_link)
+        bbc_repeated = {k for k, links in bbc_image_links.items()
+                        if len(links) >= BBC_REPEAT_IMAGE_THRESHOLD}
+        if bbc_repeated:
+            print(f"[RSS] Dropping {len(bbc_repeated)} BBC images reused across articles", flush=True)
+
         for feed_url, items in results:
             for item in items:
-                url_or_link, kind = item
+                url_or_link, kind, _item_link = item
                 if kind == "article_link":
                     article_links_to_scrape.append(url_or_link)
                 else:
                     is_bbc = kind
+                    if is_bbc and canonical_image_key(url_or_link) in bbc_repeated:
+                        continue
                     if is_bbc and bbc_added >= max_bbc_images:
                         continue
                     if add_image(url_or_link) and is_bbc:
@@ -1380,6 +1416,8 @@ def _fast_startup_seed():
                 rss = fetch_text(feed_url, timeout=4.0)
                 root = ET.fromstring(rss)
                 for item in root.findall(".//item")[:30]:
+                    if bbc_link_is_skipped(bbc_item_link(item)):
+                        continue
                     img = extract_rss_item_image(item)
                     if not img:
                         continue
@@ -1553,6 +1591,12 @@ def _pre_vet_one(url):
         # false positives on blue sky / white clothing in real outdoor photos.
         if image_is_probably_full_graphic_page(data, strict=is_bbc):
             REJECT_CACHE[url] = {"time": time.time()}
+            return
+        # BBC title cards ("In Depth", "Newsflash", ...) put text over a photo,
+        # so they pass the graphic-page check — catch the text itself.
+        if is_bbc and image_has_short_label(data):
+            REJECT_CACHE[url] = {"time": time.time()}
+            print(f"[VET] BBC rejected (text overlay): {url[:90]}", flush=True)
             return
         if image_has_center_divider(data):
             REJECT_CACHE[url] = {"time": time.time()}
@@ -1866,6 +1910,55 @@ def image_is_portrait_or_generic_isolated_subject(data, allow_vertical=False):
             return True
 
     return False
+
+def image_has_short_label(data):
+    """Detect a short text label (e.g. BBC "IN DEPTH", "NEWSFLASH") — 5+
+    same-height letter shapes sitting on one baseline, near the top or bottom."""
+    try:
+        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    except Exception:
+        return False
+    if img is None or img.size == 0:
+        return False
+    h, w = img.shape[:2]
+    if w > 640:
+        img = cv2.resize(img, (640, int(h * 640 / w)), interpolation=cv2.INTER_AREA)
+    h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    for region in (gray[:int(h * 0.30), :], gray[int(h * 0.62):, :]):
+        rh, rw = region.shape[:2]
+        if rh < 10:
+            continue
+        _, bright = cv2.threshold(region, 215, 255, cv2.THRESH_BINARY)
+        _, dark = cv2.threshold(region, 40, 255, cv2.THRESH_BINARY_INV)
+        for binary in (bright, dark):
+            n, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+            boxes = []
+            for i in range(1, n):
+                x, y, cw, ch, area = stats[i]
+                fill = area / float(cw * ch)
+                if 4 <= cw <= rw * 0.08 and 8 <= ch <= rh * 0.45 and 0.2 < fill < 0.9:
+                    boxes.append((x, y, cw, ch))
+            if len(boxes) < 5:
+                continue
+            # Group shapes into lines by vertical centre; a label is one line
+            # of 5+ shapes with near-identical height and baseline.
+            boxes.sort(key=lambda b: b[1] + b[3] / 2)
+            for i in range(len(boxes)):
+                ref = boxes[i]
+                line = [b for b in boxes
+                        if abs((b[1] + b[3]) - (ref[1] + ref[3])) <= max(2, ref[3] * 0.12)
+                        and abs(b[3] - ref[3]) <= max(2, ref[3] * 0.15)]
+                if len(line) < 5:
+                    continue
+                line.sort(key=lambda b: b[0])
+                gaps = [line[j + 1][0] - (line[j][0] + line[j][2]) for j in range(len(line) - 1)]
+                # Letters are close together (gap under ~1.5 letter heights).
+                close = sum(1 for g in gaps if -2 <= g <= ref[3] * 1.5)
+                if close >= 4:
+                    return True
+    return False
+
 
 def image_has_text_overlay(data):
     """Detect text overlaid on news photos — title cards, chyrons, graphic labels.
@@ -2676,6 +2769,10 @@ class Handler(BaseHTTPRequestHandler):
                                 self.safe_send_bytes(415, b"Rejected graphic page", extra_headers={"Cache-Control": "no-store"})
                                 return
                             if _is_f24 and image_has_text_overlay(data):
+                                REJECT_CACHE[url] = {"time": time.time()}
+                                self.safe_send_bytes(415, b"Rejected text overlay", extra_headers={"Cache-Control": "no-store"})
+                                return
+                            if _is_bbc_unvet and image_has_short_label(data):
                                 REJECT_CACHE[url] = {"time": time.time()}
                                 self.safe_send_bytes(415, b"Rejected text overlay", extra_headers={"Cache-Control": "no-store"})
                                 return
