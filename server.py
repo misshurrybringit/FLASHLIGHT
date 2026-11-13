@@ -353,6 +353,7 @@ KNOWN_BAD_URL_FRAGMENTS = [
     "fc052cb1-436e-48ae-aed3-21489989cfa0",
     "c1428a0f-bf62-47a4-b3e8-82b11b1dca2f",
     "fffcf3c0-a088-11f1-aed2-8d6da8d75094",
+    "84498144-dea4-11f1-ad4b-3f371022a770",  # France 24, thin white divider
 ]
 
 VERTICAL_ONLY_URL_FRAGMENTS = [
@@ -580,6 +581,18 @@ def clean_extracted_image_url(url):
             # scene-specific news photography.
             if x < 100 and y < 100:
                 return None
+            # Upgrade to the largest rendition the Guardian CDN has for this
+            # crop: /2000.jpg when the crop is at least 2000px wide, otherwise
+            # the crop's own full width under /master/. Small crops are dropped.
+            size_m = re.search(r'/(\d{2,4})\.jpg$', urllib.parse.urlparse(url).path)
+            if size_m and "/master/" not in url:
+                if crop_w >= 2000:
+                    url = url[:url.rfind("/")] + "/2000.jpg"
+                elif crop_w >= 1200:
+                    url = url[:url.rfind("/")] + f"/master/{crop_w}.jpg"
+                else:
+                    return None
+                lower = url.lower()
     return upgrade_bbc_image_url(url)
 
 
@@ -591,6 +604,11 @@ def canonical_image_key(url):
     inner = qs.get("url", [None])[0]
     if inner:
         return canonical_image_key(inner)
+    # Guardian: same photo appears at different sizes/crops (/1000.jpg,
+    # /2000.jpg, /master/...) — the 40-char asset hash identifies it.
+    gm = re.search(r'guim\.co\.uk/(?:img/media/)?([0-9a-f]{40})', url.lower())
+    if gm:
+        return "guim:" + gm.group(1)
     path = parsed.path.lower()
     path = re.sub(r"/(240|320|480|624|660|800|1024|1200|1600)(/|$)", "/SIZE/", path)
     path = re.sub(r"/ic/\d+x\d+/", "/ic/SIZE/", path)
@@ -2030,6 +2048,26 @@ def image_has_text_overlay(data):
     return False
 
 
+def image_has_thin_light_line(img):
+    """Thin light divider (1-4px, softened by JPEG so not pure white) down the
+    middle area: a column clearly brighter than the pixels a few columns either
+    side, along almost the full height. Checked at up to 1280px wide so a 1px
+    line isn't blurred away by downscaling."""
+    h, w = img.shape[:2]
+    if w > 1280:
+        img = cv2.resize(img, (1280, int(h * 1280 / w)), interpolation=cv2.INTER_AREA)
+        h, w = img.shape[:2]
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.int16)
+    for x in range(max(int(w * 0.18), 8), min(int(w * 0.82), w - 8)):
+        line = g[:, x - 1:x + 2].max(axis=1)
+        left = g[:, x - 8:x - 4].mean(axis=1)
+        right = g[:, x + 5:x + 9].mean(axis=1)
+        brighter = (line - left > 15) & (line - right > 15) & (line > 140)
+        if float(np.mean(brighter)) > 0.78:
+            return True
+    return False
+
+
 def image_has_center_divider(data):
     try:
         arr = np.frombuffer(data, np.uint8)
@@ -2041,6 +2079,8 @@ def image_has_center_divider(data):
     h, w = img.shape[:2]
     if w < 120 or h < 120:
         return False
+    if image_has_thin_light_line(img):
+        return True
     target_w = 520
     if w > target_w:
         scale = target_w / float(w)
@@ -2234,18 +2274,17 @@ function startSlideshow() {{
         if (r.ok) {{
           const fresh = await r.json();
           if (fresh && fresh.length > 0) {{
-            const existingKeys = new Set(slides.map(s => s.src));
+            const existingKeys = new Set(slides.map(s => photoKey(s.raw || s.src)));
             let added = 0;
+            const newSrcs = [];
             for (const item of fresh) {{
-              if (!existingKeys.has(item.src)) {{
-                slides.push(item); existingKeys.add(item.src); added++;
+              const k = photoKey(item.raw || item.src);
+              if (!existingKeys.has(k)) {{
+                slides.push(item); existingKeys.add(k); added++;
+                if (!badSrcs.has(item.src) && slideAllowedForCurrentOrientation(item)) newSrcs.push(item.src);
               }}
             }}
             if (added > 0) {{
-              const newSrcs = [];
-              for (const item of fresh) {{
-                if (!badSrcs.has(item.src) && slideAllowedForCurrentOrientation(item)) newSrcs.push(item.src);
-              }}
               if (newSrcs.length > 0) {{
                 const insertAt = Math.min(poolIndex + 1, shuffledPool.length);
                 shuffledPool.splice(insertAt, 0, ...shuffleArray(newSrcs));
@@ -2333,13 +2372,31 @@ function refillPool() {{
   shuffledPool = shuffleArray(notRecent);
   poolIndex = 0;
 }}
+function photoKey(urlOrSrc) {{
+  let u = urlOrSrc || "";
+  if (u.startsWith("/proxy?url=")) u = decodeURIComponent(u.slice(11));
+  const g = u.toLowerCase().match(/guim\\.co\\.uk\\/(?:img\\/media\\/)?([0-9a-f]{{40}})/);
+  if (g) return "guim:" + g[1];
+  return u.split("?")[0].replace(/\\/(?:w:)?\\d{{3,4}}(?=\\/|\\.jpg)/g, "/S");
+}}
+function shownRecently(src) {{
+  const k = photoKey(src);
+  const recent = recentlyShown.slice(-100);
+  for (let i = recent.length - 1; i >= 0; i--) if (photoKey(recent[i]) === k) return true;
+  return false;
+}}
 function getNextRandomSrc() {{
-  if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool();
-  if (!shuffledPool.length) return null;
-  // Skip current image to avoid immediate repeat.
-  if (shuffledPool[poolIndex] === currentSrc && shuffledPool.length > 1) poolIndex++;
-  if (poolIndex >= shuffledPool.length) refillPool();
-  return shuffledPool[poolIndex++];
+  // Skip anything shown in the last 100 slides (or the current one), unless
+  // the pool is so small that every option was shown recently.
+  for (let tries = 0; tries < 2; tries++) {{
+    if (!shuffledPool.length || poolIndex >= shuffledPool.length) refillPool();
+    while (poolIndex < shuffledPool.length) {{
+      const src = shuffledPool[poolIndex++];
+      if (photoKey(src) !== photoKey(currentSrc) && !shownRecently(src)) return src;
+    }}
+  }}
+  if (!shuffledPool.length) refillPool();
+  return shuffledPool.length ? shuffledPool[Math.floor(Math.random() * shuffledPool.length)] : null;
 }}
 
 // Preload cache — keeps next N images ready so transitions are instant.
